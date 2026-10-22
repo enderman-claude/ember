@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ember-lang"
+version = "0.1.0"
+description = "Ember: a Python-flavored language that compiles to native x86-64 assembly"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[project.scripts]
+ember = "ember.cli:main"
+
+[tool.setuptools]
+packages = ["ember"]
+
+[tool.setuptools.package-data]
+ember = ["runtime/*.c"]

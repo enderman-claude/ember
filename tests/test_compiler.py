@@ -234,5 +234,35 @@ class CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
 
 
+
+
+class TargetTests(unittest.TestCase):
+    def test_window_builtins_rejected_on_linux(self):
+        src = "def main():\n    ok = window_open(10, 10)\n"
+        self.assertIn("only available when building for Windows", compile_error(src).msg)
+
+    def test_window_builtins_accepted_for_windows(self):
+        asm = compile_to_asm("def main():\n    if window_open(10, 10):\n        print(1)\n", "windows")
+        self.assertIn("extern ember_window_open", asm)
+
+    def test_windows_target_uses_win64_argument_registers(self):
+        asm = compile_to_asm("def f(a: i64, b: i64) -> i64:\n    return a + b\n\n"
+                             "def main():\n    print(f(1, 2))\n", "windows")
+        self.assertIn("pop rdx", asm)
+        self.assertNotIn("pop rsi", asm)
+        self.assertIn("sub rsp, 32", asm)           # shadow space
+        self.assertNotIn("section .note.GNU-stack", asm)
+
+    def test_linux_target_keeps_sysv_registers(self):
+        asm = compile_to_asm("def f(a: i64, b: i64) -> i64:\n    return a + b\n\n"
+                             "def main():\n    print(f(1, 2))\n", "linux")
+        self.assertIn("pop rsi", asm)
+        self.assertIn("section .note.GNU-stack", asm)
+
+    def test_more_than_four_parameters_rejected(self):
+        src = "def f(a: i64, b: i64, c: i64, d: i64, e: i64):\n    print(a)\n\ndef main():\n    print(1)\n"
+        self.assertIn("at most 4 parameters", compile_error(src).msg)
+
+
 if __name__ == "__main__":
     unittest.main()

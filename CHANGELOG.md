@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+- `--target windows`: builds a static 64-bit Windows GUI executable with MinGW-w64
+- Win64 calling convention for Windows builds (argument registers and shadow space)
+- Window builtins `window_open`, `window_present`, `window_closed` (Windows target only)
+- `examples/windows/window_test.em`: animated gradient in a real window
+- Windows PE image tests and a strict-warnings compile of the Windows runtime
+
+### Changed
+- Functions take at most four parameters, so every target can pass them in registers
+- Panics on Windows show a message box, since GUI programs have no console
+
 ## 0.3.0
 
 ### Added

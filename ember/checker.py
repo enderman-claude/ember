@@ -7,11 +7,15 @@ I64_MIN, I64_MAX = -(2 ** 63), 2 ** 63 - 1
 ARRAY = "[i64]"
 
 
+MAX_PARAMS = 4   # the Windows x64 convention passes four arguments in registers
+
+
 @dataclass
 class Sig:
     params: list
     ret: str
     symbol: str
+    platforms: tuple = None     # None means available on every target
 
 
 # Builtins implemented by the C runtime (ember/runtime/ember_rt.c).
@@ -22,6 +26,10 @@ BUILTINS = {
     "read_int": Sig([], "i64", "ember_read_int"),
     "input_ended": Sig([], "bool", "ember_input_ended"),
     "put_byte": Sig(["i64"], "unit", "ember_put_byte"),
+    # Windows-only window builtins (ember/runtime/ember_rt.c, #ifdef _WIN32).
+    "window_open": Sig(["i64", "i64"], "bool", "ember_window_open", ("windows",)),
+    "window_present": Sig([ARRAY], "unit", "ember_window_present", ("windows",)),
+    "window_closed": Sig([], "bool", "ember_window_closed", ("windows",)),
 }
 # print() is overloaded on its argument type.
 PRINT_SYMBOLS = {"i64": "ember_print_i64", "bool": "ember_print_bool"}
@@ -55,8 +63,9 @@ def always_returns(block) -> bool:
 
 
 class Checker:
-    def __init__(self, prog: n.Program):
+    def __init__(self, prog: n.Program, target: str = "linux"):
         self.prog = prog
+        self.target = target
         self.sigs = dict(BUILTINS)
         self.scopes = []
         self.ret = "unit"
@@ -70,6 +79,8 @@ class Checker:
                 raise CompileError(f.line, f"{f.name!r} is a builtin and cannot be redefined")
             if f.name in self.sigs:
                 raise CompileError(f.line, f"function {f.name!r} is already defined")
+            if len(f.params) > MAX_PARAMS:
+                raise CompileError(f.line, f"{f.name}(): at most {MAX_PARAMS} parameters are supported")
             self.sigs[f.name] = Sig([p.type for p in f.params], f.ret, f"em_{f.name}")
         for f in self.prog.funcs:
             self.check_function(f)
@@ -247,8 +258,9 @@ class Checker:
             if len(e.args) != len(sig.params):
                 raise CompileError(
                     e.line, f"{e.name}() takes {len(sig.params)} argument(s), got {len(e.args)}")
-            if len(sig.params) > 6:
-                raise CompileError(e.line, f"{e.name}(): at most 6 parameters are supported")
+            if sig.platforms and self.target not in sig.platforms:
+                raise CompileError(
+                    e.line, f"{e.name}() is only available when building for Windows (--target windows)")
             for arg, want in zip(e.args, sig.params):
                 self.require(self.expr_type(arg), want, e.line, f"argument to {e.name}()")
             e.symbol = sig.symbol
@@ -257,5 +269,5 @@ class Checker:
         raise CompileError(getattr(e, "line", 0), f"internal error: unknown expression {e!r}")
 
 
-def check(prog: n.Program):
-    Checker(prog).check()
+def check(prog: n.Program, target: str = "linux"):
+    Checker(prog, target).check()

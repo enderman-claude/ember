@@ -48,11 +48,33 @@ git clone https://github.com/enderman-claude/ember.git && cd ember
 python -m ember run examples/fib.em
 ```
 
+## Windows programs
+
+`--target windows` produces a 64-bit Windows GUI executable that uses only the system DLLs
+(`user32`, `gdi32`, `kernel32`, `msvcrt`). It needs `nasm` and `x86_64-w64-mingw32-gcc`
+(on Debian or Ubuntu: `sudo apt-get install nasm gcc-mingw-w64-x86-64`).
+
+```
+ember build examples/windows/window_test.em --target windows -o window_test.exe
+```
+
+Double-click the result on Windows 11. The window builtins below are available only for this target.
+
+| Function | Signature | Description |
+|---|---|---|
+| `window_open` | `(i64, i64) -> bool` | Opens a window whose client area is width x height pixels |
+| `window_present` | `([i64]) -> unit` | Copies a framebuffer to the window, handles window messages, and caps the rate at about 60 frames per second |
+| `window_closed` | `() -> bool` | True once the user has closed the window |
+
+A framebuffer is an `[i64]` array with one `0xRRGGBB` value per pixel, row by row from the
+top. Its length must be at least the window's pixel count. `examples/windows/window_test.em`
+animates a gradient with a moving circle.
+
 ## Commands
 
 ```
 ember check      prog.em                 type-check only
-ember build      prog.em -o prog         produce a native executable
+ember build      prog.em -o prog         produce a native executable (--target windows for .exe)
 ember run        prog.em                 compile and run (stdin and exit code pass through)
 ember emit-asm   prog.em                 print the generated NASM assembly
 ```
@@ -194,6 +216,7 @@ have an `.in` file for stdin. Highlights:
 - `matrix.em`: matrix multiplication on arrays
 - `hanoi.em`: recursion and printed output
 - `bubble_sort.em`: reads numbers from stdin and sorts them
+- `windows/window_test.em`: animated window (Windows target)
 - `graphics/graphics_test.em`: renders a framebuffer and writes a BMP to stdout (open the output in any image viewer)
 
 Run the whole suite with `python -m unittest discover -s tests -v`.

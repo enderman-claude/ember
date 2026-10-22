@@ -7,13 +7,15 @@ operand to the stack. Each local (and each compiler temporary) gets a dedicated
 """
 from . import nodes as n
 
-ARG_REGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
+SYSV_ARG_REGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]   # Linux (System V)
+WIN_ARG_REGS = ["rcx", "rdx", "r8", "r9"]                   # Windows x64
 CMP_SETCC = {"==": "sete", "!=": "setne", "<": "setl", "<=": "setle", ">": "setg", ">=": "setge"}
 RUNTIME_SYMBOLS = [
     "ember_print_i64", "ember_print_bool", "ember_alloc", "ember_free", "ember_len",
     "ember_load", "ember_store", "ember_read_int", "ember_input_ended", "ember_put_byte",
     "ember_panic",
 ]
+WINDOW_SYMBOLS = ["ember_window_open", "ember_window_present", "ember_window_closed"]
 
 
 def align16(x: int) -> int:
@@ -28,6 +30,8 @@ class CodeGen:
         self.nslots = 0
         self.ret_label = ""
         self.loops = []          # stack of (continue_label, break_label)
+        self.target = "linux"
+        self.arg_regs = SYSV_ARG_REGS
 
     # -- output helpers -------------------------------------------------------
     def emit(self, text):
@@ -41,13 +45,17 @@ class CodeGen:
         return f".L{hint}{self.label_count}"
 
     # -- program --------------------------------------------------------------
-    def generate(self, prog: n.Program) -> str:
+    def generate(self, prog: n.Program, target: str = "linux") -> str:
+        self.target = target
+        self.arg_regs = WIN_ARG_REGS if target == "windows" else SYSV_ARG_REGS
         self.lines = ["section .text"]
-        for sym in RUNTIME_SYMBOLS:
+        symbols = RUNTIME_SYMBOLS + (WINDOW_SYMBOLS if target == "windows" else [])
+        for sym in symbols:
             self.lines.append(f"extern {sym}")
         for f in prog.funcs:
             self.gen_function(f)
-        self.lines.append("section .note.GNU-stack noalloc noexec nowrite progbits")
+        if target == "linux":
+            self.lines.append("section .note.GNU-stack noalloc noexec nowrite progbits")
         return "\n".join(self.lines) + "\n"
 
     def gen_function(self, f: n.FuncDef):
@@ -59,7 +67,7 @@ class CodeGen:
         # Generate the body first so the final frame size is known.
         saved = self.lines
         self.lines = []
-        for p, reg in zip(f.params, ARG_REGS):
+        for p, reg in zip(f.params, self.arg_regs):
             self.emit(f"mov [rbp-{self.declare(p.name)}], {reg}")
         self.gen_block(f.body)
         body = self.lines
@@ -110,6 +118,7 @@ class CodeGen:
         self.emit("push rbx")
         self.emit("mov rbx, rsp")
         self.emit("and rsp, -16")
+        self.emit("sub rsp, 32")                 # shadow space required by the Windows ABI
         self.emit(f"call {symbol}")
         self.emit("mov rsp, rbx")
         self.emit("pop rbx")
@@ -118,7 +127,7 @@ class CodeGen:
         for a in args:
             self.gen_expr(a)
             self.emit("push rax")
-        for reg in reversed(ARG_REGS[:len(args)]):
+        for reg in reversed(self.arg_regs[:len(args)]):
             self.emit(f"pop {reg}")
         self.emit_call(symbol)
 
@@ -250,9 +259,10 @@ class CodeGen:
             self.emit(f"mov [rbp-{handle}], rax")
             for i, el in enumerate(e.elems):
                 self.gen_expr(el)
-                self.emit("mov rdx, rax")
-                self.emit(f"mov rdi, [rbp-{handle}]")
-                self.emit(f"mov rsi, {i}")
+                a0, a1, a2 = self.arg_regs[:3]
+                self.emit(f"mov {a2}, rax")
+                self.emit(f"mov {a0}, [rbp-{handle}]")
+                self.emit(f"mov {a1}, {i}")
                 self.emit_call("ember_store")
             self.emit(f"mov rax, [rbp-{handle}]")
 
@@ -286,7 +296,7 @@ class CodeGen:
         done = self.new_label("divdone")
         self.emit("test rcx, rcx")
         self.emit(f"jnz {ok}")
-        self.emit("mov edi, 1")                  # panic code 1: division by zero
+        self.emit(f"mov {self.arg_regs[0]}, 1")  # panic code 1: division by zero
         self.emit_call("ember_panic")
         self.label(ok)
         self.emit("cmp rcx, -1")
@@ -301,5 +311,5 @@ class CodeGen:
         self.label(done)
 
 
-def generate(prog: n.Program) -> str:
-    return CodeGen().generate(prog)
+def generate(prog: n.Program, target: str = "linux") -> str:
+    return CodeGen().generate(prog, target)

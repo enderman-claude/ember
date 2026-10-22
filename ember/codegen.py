@@ -11,7 +11,8 @@ ARG_REGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
 CMP_SETCC = {"==": "sete", "!=": "setne", "<": "setl", "<=": "setle", ">": "setg", ">=": "setge"}
 RUNTIME_SYMBOLS = [
     "ember_print_i64", "ember_print_bool", "ember_alloc", "ember_free", "ember_len",
-    "ember_load", "ember_store", "ember_read_int", "ember_input_ended", "ember_panic",
+    "ember_load", "ember_store", "ember_read_int", "ember_input_ended", "ember_put_byte",
+    "ember_panic",
 ]
 
 

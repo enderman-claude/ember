@@ -80,6 +80,11 @@ void ember_store(int64_t handle, int64_t i, int64_t value) {
 
 /* Reads one integer from stdin. At end of input it returns 0 and sets the flag
  * that input_ended() reports. */
+/* Writes one raw byte to stdout. Used for binary output such as BMP files. */
+void ember_put_byte(int64_t value) {
+    putchar((int)(value & 0xFF));
+}
+
 int64_t ember_read_int(void) {
     long long v = 0;
     if (scanf("%lld", &v) == 1) {

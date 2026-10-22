@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+- `put_byte` builtin for writing raw binary to stdout
+- `examples/graphics/graphics_test.em`: renders a 320x240 framebuffer and writes a 24-bit BMP
+- Test that checks the BMP header and sample pixels
+
 ## 0.2.0
 
 ### Added

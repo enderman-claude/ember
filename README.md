@@ -181,6 +181,7 @@ it twice, is undefined behavior. A future version will add ownership rules that 
 | `len` | `[i64] -> i64` | Returns the array length |
 | `read_int` | `() -> i64` | Reads the next integer from stdin. Returns 0 at end of input. |
 | `input_ended` | `() -> bool` | True if the last `read_int` hit end of input |
+| `put_byte` | `i64 -> unit` | Writes one raw byte (the low 8 bits) to stdout, for binary output |
 
 ## Examples
 
@@ -193,6 +194,7 @@ have an `.in` file for stdin. Highlights:
 - `matrix.em`: matrix multiplication on arrays
 - `hanoi.em`: recursion and printed output
 - `bubble_sort.em`: reads numbers from stdin and sorts them
+- `graphics/graphics_test.em`: renders a framebuffer and writes a BMP to stdout (open the output in any image viewer)
 
 Run the whole suite with `python -m unittest discover -s tests -v`.
 

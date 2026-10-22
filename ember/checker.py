@@ -21,6 +21,7 @@ BUILTINS = {
     "len": Sig([ARRAY], "i64", "ember_len"),
     "read_int": Sig([], "i64", "ember_read_int"),
     "input_ended": Sig([], "bool", "ember_input_ended"),
+    "put_byte": Sig(["i64"], "unit", "ember_put_byte"),
 }
 # print() is overloaded on its argument type.
 PRINT_SYMBOLS = {"i64": "ember_print_i64", "bool": "ember_print_bool"}

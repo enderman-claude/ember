@@ -137,3 +137,34 @@ class RuntimeSemantics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE_TOOLS, "nasm and cc are required for end-to-end tests")
+class GraphicsOutput(unittest.TestCase):
+    """The graphics example writes a binary BMP, so this test reads stdout as bytes."""
+
+    def test_graphics_test_writes_valid_bmp(self):
+        import struct
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = build(ROOT / "examples" / "graphics" / "graphics_test.em", Path(tmp) / "gfx")
+            proc = subprocess.run([str(exe)], capture_output=True, timeout=20)
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode(errors="replace"))
+        data = proc.stdout
+        sig, size, _, _, offset = struct.unpack_from("<2sIHHI", data, 0)
+        dib_size, w, h, planes, bpp, compression = struct.unpack_from("<IiiHHI", data, 14)
+        self.assertEqual((sig, offset, dib_size, planes, bpp, compression), (b"BM", 54, 40, 1, 24, 0))
+        self.assertEqual((w, h), (320, 240))
+        row = w * 3 + (4 - (w * 3) % 4) % 4
+        self.assertEqual(size, len(data))
+        self.assertEqual(len(data), 54 + row * h)
+
+        def pixel(x, y):              # BMP rows are stored bottom-up, pixels as BGR
+            i = offset + (h - 1 - y) * row + x * 3
+            return (data[i + 2], data[i + 1], data[i])
+
+        self.assertEqual(pixel(50, 60), (230, 40, 40))     # rectangle
+        self.assertEqual(pixel(230, 150), (250, 210, 30))  # circle centre
+        self.assertEqual(pixel(250, 10), (255, 255, 255))  # checkerboard
+        self.assertEqual(pixel(254, 10), (0, 0, 0))
+        self.assertEqual(pixel(0, 0), (255, 255, 255))     # border
+        self.assertEqual(pixel(1, 1), (0, 1, 160))         # gradient

@@ -53,7 +53,10 @@ class CodeGen:
         for sym in symbols:
             self.lines.append(f"extern {sym}")
         for f in prog.funcs:
-            self.gen_function(f)
+            if f.body is None:                   # extern: declared above by its C name
+                self.lines.append(f"extern {f.name}")
+            else:
+                self.gen_function(f)
         if target == "linux":
             self.lines.append("section .note.GNU-stack noalloc noexec nowrite progbits")
         return "\n".join(self.lines) + "\n"

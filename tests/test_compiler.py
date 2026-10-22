@@ -264,5 +264,32 @@ class TargetTests(unittest.TestCase):
         self.assertIn("at most 4 parameters", compile_error(src).msg)
 
 
+
+
+class ExternTests(unittest.TestCase):
+    def test_extern_declares_symbol_and_calls_it_by_name(self):
+        asm = compile_to_asm("extern def c_add(a: i64, b: i64) -> i64\n\n"
+                             "def main():\n    print(c_add(1, 2))\n")
+        self.assertIn("extern c_add", asm)
+        self.assertIn("call c_add", asm)
+        self.assertNotIn("em_c_add", asm)
+
+    def test_extern_has_no_body(self):
+        prog = parse("extern def f(x: i64)\n\ndef main():\n    print(1)\n")
+        self.assertIsNone(prog.funcs[0].body)
+
+    def test_extern_with_body_is_a_syntax_error(self):
+        e = compile_error("extern def f(x: i64):\n    print(x)\n\ndef main():\n    print(1)\n")
+        self.assertIn("end of line", e.msg)
+
+    def test_extern_type_checked_like_a_function(self):
+        e = compile_error("extern def f(x: i64) -> i64\n\ndef main():\n    print(f(true))\n")
+        self.assertIn("argument to f()", e.msg)
+
+    def test_extern_cannot_shadow_builtin(self):
+        e = compile_error("extern def len(x: i64) -> i64\n\ndef main():\n    print(1)\n")
+        self.assertIn("builtin", e.msg)
+
+
 if __name__ == "__main__":
     unittest.main()

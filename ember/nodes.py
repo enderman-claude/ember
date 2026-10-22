@@ -146,7 +146,7 @@ class FuncDef:
     name: str
     params: list
     ret: str                        # "i64", "bool", "[i64]", or "unit"
-    body: list
+    body: Optional[list]            # None for an `extern def` (implemented in C)
 
 
 @dataclass

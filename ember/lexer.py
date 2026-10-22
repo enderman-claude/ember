@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from .errors import CompileError
 
 KEYWORDS = {
-    "def", "return", "if", "elif", "else", "while", "for", "in",
+    "def", "extern", "return", "if", "elif", "else", "while", "for", "in",
     "break", "continue", "mut", "true", "false", "and", "or", "not",
 }
 OPS2 = ("==", "!=", "<=", ">=", "->")

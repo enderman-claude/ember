@@ -18,9 +18,13 @@ def main(argv=None) -> int:
     p_build.add_argument("-o", "--output", help="output path (default: source name without .em, plus .exe on Windows)")
     p_build.add_argument("--target", choices=TARGETS, default="linux",
                          help="linux (ELF) or windows (.exe, GUI subsystem)")
+    p_build.add_argument("--link", action="append", default=[], metavar="FILE",
+                         help="C source, object or linker flag (e.g. -lm); repeatable")
 
     p_run = sub.add_parser("run", help="compile and run on this machine (Linux)")
     p_run.add_argument("file")
+    p_run.add_argument("--link", action="append", default=[], metavar="FILE",
+                       help="C source, object or linker flag (e.g. -lm); repeatable")
 
     p_check = sub.add_parser("check", help="type-check without producing output")
     p_check.add_argument("file")
@@ -42,11 +46,11 @@ def main(argv=None) -> int:
         elif args.cmd == "build":
             default = src_path.with_suffix(".exe" if args.target == "windows" else "")
             out = Path(args.output) if args.output else default
-            build(src_path, out, args.target)
+            build(src_path, out, args.target, link=args.link)
             print(f"built {out}")
         elif args.cmd == "run":
             with tempfile.TemporaryDirectory() as tmp:
-                exe = build(src_path, Path(tmp) / "prog", "linux")
+                exe = build(src_path, Path(tmp) / "prog", "linux", link=args.link)
                 return subprocess.run([str(exe)]).returncode
     except CompileError as err:
         print(f"{args.file}: error: {err}", file=sys.stderr)

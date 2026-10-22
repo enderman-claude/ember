@@ -168,3 +168,24 @@ class GraphicsOutput(unittest.TestCase):
         self.assertEqual(pixel(254, 10), (0, 0, 0))
         self.assertEqual(pixel(0, 0), (255, 255, 255))     # border
         self.assertEqual(pixel(1, 1), (0, 1, 160))         # gradient
+
+
+@unittest.skipUnless(HAVE_TOOLS, "nasm and cc are required for end-to-end tests")
+class ForeignFunctions(unittest.TestCase):
+    """extern def calls into C code supplied with --link."""
+
+    def test_extern_calls_reach_c_implementations(self):
+        from ember.driver import build as build_with_link
+        impl = ROOT / "examples" / "ffi" / "extern_demo_impl.c"
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = build_with_link(ROOT / "examples" / "ffi" / "extern_demo.em",
+                                  Path(tmp) / "demo", "linux", link=[impl])
+            proc = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, "42\n7\n7\n")
+
+    def test_extern_without_link_fails_at_link_time(self):
+        from ember.driver import build as build_with_link
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(RuntimeError):
+                build_with_link(ROOT / "examples" / "ffi" / "extern_demo.em", Path(tmp) / "demo")

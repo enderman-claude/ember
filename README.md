@@ -70,6 +70,25 @@ A framebuffer is an `[i64]` array with one `0xRRGGBB` value per pixel, row by ro
 top. Its length must be at least the window's pixel count. `examples/windows/window_test.em`
 animates a gradient with a moving circle.
 
+## Calling C
+
+`extern def` declares a C function. Ember passes `i64` and `bool` arguments using the platform
+calling convention, so the function can be written in C:
+
+```python
+extern def c_add(a: i64, b: i64) -> i64
+
+def main():
+    print(c_add(40, 2))
+```
+
+Link the implementation with `--link`:
+
+```
+ember run prog.em --link impl.c
+ember run prog.em --link impl.c --link -lm
+```
+
 ## Commands
 
 ```

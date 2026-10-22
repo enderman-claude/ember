@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+- `extern def name(params) -> type`: declares a C function that Ember programs can call.
+  Arguments follow the platform calling convention, so C code can implement them directly.
+- `--link ITEM` on `build` and `run`: adds a C source, an object file, or a compiler or
+  linker flag such as `-lX11` or `-Idir`
+- `examples/ffi/`: an Ember program calling C functions
+
 ## 0.4.0
 
 ### Added

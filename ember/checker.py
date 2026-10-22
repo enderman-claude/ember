@@ -81,9 +81,12 @@ class Checker:
                 raise CompileError(f.line, f"function {f.name!r} is already defined")
             if len(f.params) > MAX_PARAMS:
                 raise CompileError(f.line, f"{f.name}(): at most {MAX_PARAMS} parameters are supported")
-            self.sigs[f.name] = Sig([p.type for p in f.params], f.ret, f"em_{f.name}")
+            # Extern functions keep their C name; Ember functions get an em_ prefix.
+            symbol = f.name if f.body is None else f"em_{f.name}"
+            self.sigs[f.name] = Sig([p.type for p in f.params], f.ret, symbol)
         for f in self.prog.funcs:
-            self.check_function(f)
+            if f.body is not None:
+                self.check_function(f)
 
     # -- scopes ---------------------------------------------------------------
     def lookup(self, name):

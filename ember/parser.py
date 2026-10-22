@@ -42,6 +42,8 @@ class Parser:
         while not self.at("EOF"):
             if self.at("def"):
                 funcs.append(self.parse_def())
+            elif self.at("extern"):
+                funcs.append(self.parse_extern())
             else:
                 t = self.peek()
                 raise CompileError(
@@ -53,9 +55,24 @@ class Parser:
             self.skip_newlines()
         return n.Program(funcs)
 
+    def parse_extern(self):
+        """`extern def name(params) -> type`: a C function the program may call."""
+        self.expect("extern")
+        kw = self.expect("def", "'def' after 'extern'")
+        name = self.expect("NAME", "function name").value
+        params, ret = self.parse_signature()
+        self.expect("NEWLINE", "end of line (extern functions have no body)")
+        return n.FuncDef(kw.line, name, params, ret, None)
+
     def parse_def(self):
         kw = self.expect("def")
         name = self.expect("NAME", "function name").value
+        params, ret = self.parse_signature()
+        self.expect(":", "':' before function body")
+        return n.FuncDef(kw.line, name, params, ret, self.parse_block())
+
+    def parse_signature(self):
+        """Parses `(params) [-> type]` and returns (params, return type)."""
         self.expect("(", "'('")
         params = []
         if not self.at(")"):
@@ -71,8 +88,7 @@ class Parser:
         if self.at("->"):
             self.advance()
             ret = self.parse_type()
-        self.expect(":", "':' before function body")
-        return n.FuncDef(kw.line, name, params, ret, self.parse_block())
+        return params, ret
 
     def parse_type(self):
         if self.at("["):

@@ -291,5 +291,15 @@ class ExternTests(unittest.TestCase):
         self.assertIn("builtin", e.msg)
 
 
+class LiteralTests(unittest.TestCase):
+    def test_hex_and_underscore_literals_tokenise_to_decimal(self):
+        toks = [t for t in tokenize("x = 0xFF0000 + 0x0_1 + 1_000\n") if t.kind == "INT"]
+        self.assertEqual([t.value for t in toks], ["16711680", "1", "1000"])
+
+    def test_empty_hex_literal_rejected(self):
+        with self.assertRaises(CompileError):
+            tokenize("x = 0x\n")
+
+
 if __name__ == "__main__":
     unittest.main()

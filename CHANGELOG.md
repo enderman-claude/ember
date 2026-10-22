@@ -8,6 +8,7 @@
 - `--link ITEM` on `build` and `run`: adds a C source, an object file, or a compiler or
   linker flag such as `-lX11` or `-Idir`
 - `examples/ffi/`: an Ember program calling C functions
+- Hexadecimal literals (`0xFF0000`) and `_` digit separators (`1_000_000`)
 
 ## 0.4.0
 

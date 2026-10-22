@@ -47,11 +47,20 @@ def tokenize(src: str) -> list:
             col = indent + i + 1
             if c == " ":
                 i += 1
+            elif body[i:i + 2] in ("0x", "0X"):
+                j = i + 2
+                while j < len(body) and body[j] in "0123456789abcdefABCDEF_":
+                    j += 1
+                digits = body[i + 2:j].replace("_", "")
+                if not digits:
+                    raise CompileError(lineno, "hexadecimal literal has no digits", col)
+                tokens.append(Token("INT", str(int(digits, 16)), lineno, col))
+                i = j
             elif c.isdigit():
                 j = i
-                while j < len(body) and body[j].isdigit():
+                while j < len(body) and (body[j].isdigit() or body[j] == "_"):
                     j += 1
-                tokens.append(Token("INT", body[i:j], lineno, col))
+                tokens.append(Token("INT", body[i:j].replace("_", ""), lineno, col))
                 i = j
             elif c.isalpha() or c == "_":
                 j = i

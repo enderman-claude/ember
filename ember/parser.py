@@ -3,8 +3,8 @@ from .errors import CompileError
 from .lexer import tokenize
 from . import nodes as n
 
-TYPES = ("i64", "bool")
 CMP_OPS = ("==", "!=", "<", "<=", ">", ">=")
+SCALAR_TYPES = ("i64", "bool")
 
 
 class Parser:
@@ -72,13 +72,19 @@ class Parser:
             self.advance()
             ret = self.parse_type()
         self.expect(":", "':' before function body")
-        body = self.parse_block()
-        return n.FuncDef(kw.line, name, params, ret, body)
+        return n.FuncDef(kw.line, name, params, ret, self.parse_block())
 
     def parse_type(self):
+        if self.at("["):
+            self.advance()
+            elem = self.expect("NAME", "element type")
+            if elem.value != "i64":
+                raise CompileError(elem.line, "only arrays of i64 are supported; write [i64]", elem.col)
+            self.expect("]", "']'")
+            return "[i64]"
         t = self.expect("NAME", "type name")
-        if t.value not in TYPES:
-            raise CompileError(t.line, f"unknown type {t.value!r} (expected one of {', '.join(TYPES)})", t.col)
+        if t.value not in SCALAR_TYPES:
+            raise CompileError(t.line, f"unknown type {t.value!r} (expected i64, bool or [i64])", t.col)
         return t.value
 
     # -- statements -----------------------------------------------------------
@@ -97,32 +103,46 @@ class Parser:
 
     def parse_stmt(self):
         t = self.peek()
-        if t.kind == "if":
+        k = t.kind
+        if k == "if":
             return self.parse_if()
-        if t.kind == "while":
+        if k == "while":
             self.advance()
             cond = self.parse_expr()
             self.expect(":", "':' after while condition")
             return n.While(t.line, cond, self.parse_block())
-        if t.kind == "return":
+        if k == "for":
+            return self.parse_for()
+        if k == "return":
             self.advance()
             value = None if self.at("NEWLINE") else self.parse_expr()
             self.expect("NEWLINE")
             return n.Return(t.line, value)
-        if t.kind == "mut":
+        if k in ("break", "continue"):
+            self.advance()
+            self.expect("NEWLINE")
+            return n.Break(t.line) if k == "break" else n.Continue(t.line)
+        if k == "mut":
             self.advance()
             name = self.expect("NAME", "variable name").value
             self.expect("=", "'=' in mut declaration")
             expr = self.parse_expr()
             self.expect("NEWLINE")
             return n.Let(t.line, name, expr)
-        if t.kind == "NAME" and self.peek(1).kind == "=":
+        if k == "NAME" and self.peek(1).kind == "=":
             self.advance()
             self.advance()
             expr = self.parse_expr()
             self.expect("NEWLINE")
             return n.Assign(t.line, t.value, expr)
         expr = self.parse_expr()
+        if self.at("="):
+            eq = self.advance()
+            if not isinstance(expr, n.Index):
+                raise CompileError(eq.line, "the left side of '=' must be a name or an array element", eq.col)
+            value = self.parse_expr()
+            self.expect("NEWLINE")
+            return n.IndexAssign(t.line, expr.target, expr.index, value)
         self.expect("NEWLINE")
         return n.ExprStmt(t.line, expr)
 
@@ -142,6 +162,26 @@ class Parser:
             self.expect(":", "':' after else")
             else_body = self.parse_block()
         return n.If(t.line, branches, else_body)
+
+    def parse_for(self):
+        t = self.advance()  # 'for'
+        var = self.expect("NAME", "loop variable").value
+        self.expect("in", "'in'")
+        r = self.expect("NAME", "'range'")
+        if r.value != "range":
+            raise CompileError(r.line, "only `for x in range(...)` loops are supported", r.col)
+        self.expect("(", "'('")
+        args = [self.parse_expr()]
+        if self.at(","):
+            self.advance()
+            args.append(self.parse_expr())
+        self.expect(")", "')'")
+        if len(args) == 1:
+            start, stop = n.IntLit(t.line, 0), args[0]
+        else:
+            start, stop = args
+        self.expect(":", "':' after for header")
+        return n.For(t.line, var, start, stop, self.parse_block())
 
     # -- expressions (lowest to highest precedence) ----------------------------
     def parse_expr(self):
@@ -192,7 +232,25 @@ class Parser:
         if self.at("-"):
             t = self.advance()
             return n.Unary(t.line, "-", self.parse_unary())
-        return self.parse_primary()
+        return self.parse_postfix()
+
+    def parse_postfix(self):
+        e = self.parse_primary()
+        while self.at("["):
+            t = self.advance()
+            index = self.parse_expr()
+            self.expect("]", "']'")
+            e = n.Index(t.line, e, index)
+        return e
+
+    def parse_expr_list(self, closer):
+        items = []
+        while not self.at(closer):
+            items.append(self.parse_expr())
+            if not self.at(","):
+                break
+            self.advance()
+        return items
 
     def parse_primary(self):
         t = self.peek()
@@ -206,16 +264,15 @@ class Parser:
             self.advance()
             if self.at("("):
                 self.advance()
-                args = []
-                if not self.at(")"):
-                    while True:
-                        args.append(self.parse_expr())
-                        if not self.at(","):
-                            break
-                        self.advance()
+                args = self.parse_expr_list(")")
                 self.expect(")", "')' after arguments")
                 return n.Call(t.line, t.value, args)
             return n.Name(t.line, t.value)
+        if t.kind == "[":
+            self.advance()
+            elems = self.parse_expr_list("]")
+            self.expect("]", "']' to close the array literal")
+            return n.ArrayLit(t.line, elems)
         if t.kind == "(":
             self.advance()
             e = self.parse_expr()

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ember-lang"
-version = "0.1.0"
+version = "0.2.0"
 description = "Ember: a Python-flavored language that compiles to native x86-64 assembly"
 readme = "README.md"
 requires-python = ">=3.10"

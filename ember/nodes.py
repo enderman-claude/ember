@@ -43,6 +43,20 @@ class Call:
     line: int
     name: str
     args: list = field(default_factory=list)
+    symbol: str = ""   # filled in by the checker: the function's symbol
+
+
+@dataclass
+class Index:
+    line: int
+    target: object     # an array expression
+    index: object
+
+
+@dataclass
+class ArrayLit:
+    line: int
+    elems: list
 
 
 # ---- statements ------------------------------------------------------------
@@ -61,6 +75,14 @@ class Assign:
     line: int
     name: str
     expr: object
+
+
+@dataclass
+class IndexAssign:
+    line: int
+    target: object
+    index: object
+    value: object
 
 
 @dataclass
@@ -84,6 +106,26 @@ class While:
 
 
 @dataclass
+class For:
+    """`for name in range(start, stop):`. The stop bound is evaluated once."""
+    line: int
+    name: str
+    start: object
+    stop: object
+    body: list
+
+
+@dataclass
+class Break:
+    line: int
+
+
+@dataclass
+class Continue:
+    line: int
+
+
+@dataclass
 class ExprStmt:
     line: int
     expr: object
@@ -103,7 +145,7 @@ class FuncDef:
     line: int
     name: str
     params: list
-    ret: str                        # "i64", "bool", or "unit"
+    ret: str                        # "i64", "bool", "[i64]", or "unit"
     body: list
 
 

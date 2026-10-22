@@ -3,11 +3,11 @@ from dataclasses import dataclass
 from .errors import CompileError
 
 KEYWORDS = {
-    "def", "return", "if", "elif", "else", "while", "mut",
-    "true", "false", "and", "or", "not",
+    "def", "return", "if", "elif", "else", "while", "for", "in",
+    "break", "continue", "mut", "true", "false", "and", "or", "not",
 }
 OPS2 = ("==", "!=", "<=", ">=", "->")
-OPS1 = set("+-*/%<>=():,")
+OPS1 = set("+-*/%<>=():,[]")
 
 
 @dataclass
@@ -22,6 +22,7 @@ def tokenize(src: str) -> list:
     tokens = []
     indents = [0]
     lineno = 0
+    src = src.replace("\r\n", "\n")
     for lineno, raw in enumerate(src.split("\n"), 1):
         code = raw.split("#", 1)[0].rstrip()          # `#` starts a comment
         if not code.strip():

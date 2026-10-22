@@ -1,13 +1,18 @@
 """x86-64 code generator. Emits NASM syntax for ELF64 using the System V calling convention.
 
 Design: every expression leaves its result in rax. Binary operators spill the left
-operand to the stack. Each local variable gets a dedicated 8-byte slot in the frame.
+operand to the stack. Each local (and each compiler temporary) gets a dedicated
+8-byte frame slot. Calls into the runtime go through emit_call, which keeps rsp
+16-byte aligned regardless of how deep the expression stack is.
 """
 from . import nodes as n
 
 ARG_REGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
-BUILTIN_SYMBOLS = {"print": "ember_print_i64"}
 CMP_SETCC = {"==": "sete", "!=": "setne", "<": "setl", "<=": "setle", ">": "setg", ">=": "setge"}
+RUNTIME_SYMBOLS = [
+    "ember_print_i64", "ember_print_bool", "ember_alloc", "ember_free", "ember_len",
+    "ember_load", "ember_store", "ember_read_int", "ember_input_ended", "ember_panic",
+]
 
 
 def align16(x: int) -> int:
@@ -21,6 +26,7 @@ class CodeGen:
         self.scopes = []
         self.nslots = 0
         self.ret_label = ""
+        self.loops = []          # stack of (continue_label, break_label)
 
     # -- output helpers -------------------------------------------------------
     def emit(self, text):
@@ -36,7 +42,7 @@ class CodeGen:
     # -- program --------------------------------------------------------------
     def generate(self, prog: n.Program) -> str:
         self.lines = ["section .text"]
-        for sym in sorted(set(BUILTIN_SYMBOLS.values())):
+        for sym in RUNTIME_SYMBOLS:
             self.lines.append(f"extern {sym}")
         for f in prog.funcs:
             self.gen_function(f)
@@ -44,10 +50,10 @@ class CodeGen:
         return "\n".join(self.lines) + "\n"
 
     def gen_function(self, f: n.FuncDef):
-        symbol = f"em_{f.name}"
         self.ret_label = self.new_label("ret")
         self.scopes = [{}]
         self.nslots = 0
+        self.loops = []
 
         # Generate the body first so the final frame size is known.
         saved = self.lines
@@ -59,13 +65,13 @@ class CodeGen:
         self.lines = saved
 
         frame = align16(8 * self.nslots)
-        self.lines.append(f"global {symbol}")
-        self.label(symbol)
+        self.lines.append(f"global em_{f.name}")
+        self.label(f"em_{f.name}")
         self.emit("push rbp")
         self.emit("mov rbp, rsp")
         if frame:
             self.emit(f"sub rsp, {frame}")
-        for k in range(1, self.nslots + 1):          # zero every slot for determinism
+        for k in range(1, self.nslots + 1):        # zero every slot for determinism
             self.emit(f"mov qword [rbp-{8 * k}], 0")
         self.lines.extend(body)
         self.label(self.ret_label)
@@ -79,17 +85,41 @@ class CodeGen:
         self.scopes[-1][name] = 8 * self.nslots
         return 8 * self.nslots
 
-    def lookup(self, name):
+    def find(self, name):
         for scope in reversed(self.scopes):
             if name in scope:
                 return scope[name]
-        raise AssertionError(f"codegen: unresolved name {name!r} (checker should have caught this)")
+        return None
+
+    def lookup(self, name):
+        off = self.find(name)
+        if off is None:
+            raise AssertionError(f"codegen: unresolved name {name!r} (the checker should have caught this)")
+        return off
 
     def gen_block(self, stmts):
         self.scopes.append({})
         for s in stmts:
             self.gen_stmt(s)
         self.scopes.pop()
+
+    # -- calls ----------------------------------------------------------------
+    def emit_call(self, symbol):
+        """Call with rsp aligned to 16 bytes. rbx (callee-saved) is restored afterwards."""
+        self.emit("push rbx")
+        self.emit("mov rbx, rsp")
+        self.emit("and rsp, -16")
+        self.emit(f"call {symbol}")
+        self.emit("mov rsp, rbx")
+        self.emit("pop rbx")
+
+    def gen_call(self, args, symbol):
+        for a in args:
+            self.gen_expr(a)
+            self.emit("push rax")
+        for reg in reversed(ARG_REGS[:len(args)]):
+            self.emit(f"pop {reg}")
+        self.emit_call(symbol)
 
     # -- statements -----------------------------------------------------------
     def gen_stmt(self, s):
@@ -99,14 +129,13 @@ class CodeGen:
 
         elif isinstance(s, n.Assign):
             self.gen_expr(s.expr)
-            found = None
-            for scope in reversed(self.scopes):
-                if s.name in scope:
-                    found = scope[s.name]
-                    break
-            if found is None:
-                found = self.declare(s.name)
-            self.emit(f"mov [rbp-{found}], rax")
+            off = self.find(s.name)
+            if off is None:
+                off = self.declare(s.name)
+            self.emit(f"mov [rbp-{off}], rax")
+
+        elif isinstance(s, n.IndexAssign):
+            self.gen_call([s.target, s.index, s.value], "ember_store")
 
         elif isinstance(s, n.Return):
             if s.value is not None:
@@ -134,9 +163,46 @@ class CodeGen:
             self.gen_expr(s.cond)
             self.emit("cmp rax, 0")
             self.emit(f"je {end}")
+            self.loops.append((top, end))
             self.gen_block(s.body)
+            self.loops.pop()
             self.emit(f"jmp {top}")
             self.label(end)
+
+        elif isinstance(s, n.For):
+            # Bounds are evaluated once, in the enclosing scope, into hidden slots.
+            start_slot = self.declare(self.new_label("start"))
+            stop_slot = self.declare(self.new_label("stop"))
+            self.gen_expr(s.start)
+            self.emit(f"mov [rbp-{start_slot}], rax")
+            self.gen_expr(s.stop)
+            self.emit(f"mov [rbp-{stop_slot}], rax")
+
+            self.scopes.append({})
+            var = self.declare(s.name)
+            self.emit(f"mov rax, [rbp-{start_slot}]")
+            self.emit(f"mov [rbp-{var}], rax")
+            top = self.new_label("for")
+            cont = self.new_label("forcont")
+            end = self.new_label("endfor")
+            self.label(top)
+            self.emit(f"mov rax, [rbp-{var}]")
+            self.emit(f"cmp rax, [rbp-{stop_slot}]")
+            self.emit(f"jge {end}")
+            self.loops.append((cont, end))
+            self.gen_block(s.body)
+            self.loops.pop()
+            self.label(cont)
+            self.emit(f"add qword [rbp-{var}], 1")
+            self.emit(f"jmp {top}")
+            self.label(end)
+            self.scopes.pop()
+
+        elif isinstance(s, n.Break):
+            self.emit(f"jmp {self.loops[-1][1]}")
+
+        elif isinstance(s, n.Continue):
+            self.emit(f"jmp {self.loops[-1][0]}")
 
         elif isinstance(s, n.ExprStmt):
             self.gen_expr(s.expr)
@@ -161,7 +227,7 @@ class CodeGen:
 
         elif isinstance(e, n.Binary):
             if e.op in ("and", "or"):
-                # short-circuit: skip the right side when the left one decides the result
+                # short-circuit: the right side is skipped when the left decides the result
                 end = self.new_label("sc")
                 self.gen_expr(e.left)
                 self.emit("cmp rax, 0")
@@ -169,47 +235,69 @@ class CodeGen:
                 self.gen_expr(e.right)
                 self.label(end)
             else:
-                self.gen_expr(e.left)
-                self.emit("push rax")
-                self.gen_expr(e.right)
-                self.emit("mov rcx, rax")
-                self.emit("pop rax")
-                if e.op == "+":
-                    self.emit("add rax, rcx")
-                elif e.op == "-":
-                    self.emit("sub rax, rcx")
-                elif e.op == "*":
-                    self.emit("imul rax, rcx")
-                elif e.op == "/":
-                    self.emit("cqo")
-                    self.emit("idiv rcx")
-                elif e.op == "%":
-                    self.emit("cqo")
-                    self.emit("idiv rcx")
-                    self.emit("mov rax, rdx")
-                else:
-                    self.emit("cmp rax, rcx")
-                    self.emit(f"{CMP_SETCC[e.op]} al")
-                    self.emit("movzx rax, al")
+                self.gen_binary(e)
 
         elif isinstance(e, n.Call):
-            for arg in e.args:
-                self.gen_expr(arg)
-                self.emit("push rax")
-            for reg in reversed(ARG_REGS[:len(e.args)]):
-                self.emit(f"pop {reg}")
-            symbol = BUILTIN_SYMBOLS.get(e.name, f"em_{e.name}")
-            # Align rsp to 16 bytes for the call, whatever the expression depth.
-            # rbx is callee-saved, so it is restored afterwards.
-            self.emit("push rbx")
-            self.emit("mov rbx, rsp")
-            self.emit("and rsp, -16")
-            self.emit(f"call {symbol}")
-            self.emit("mov rsp, rbx")
-            self.emit("pop rbx")
+            self.gen_call(e.args, e.symbol)
+
+        elif isinstance(e, n.Index):
+            self.gen_call([e.target, e.index], "ember_load")
+
+        elif isinstance(e, n.ArrayLit):
+            handle = self.declare(self.new_label("arr"))
+            self.gen_call([n.IntLit(e.line, len(e.elems))], "ember_alloc")
+            self.emit(f"mov [rbp-{handle}], rax")
+            for i, el in enumerate(e.elems):
+                self.gen_expr(el)
+                self.emit("mov rdx, rax")
+                self.emit(f"mov rdi, [rbp-{handle}]")
+                self.emit(f"mov rsi, {i}")
+                self.emit_call("ember_store")
+            self.emit(f"mov rax, [rbp-{handle}]")
 
         else:
             raise AssertionError(f"codegen: unknown expression {e!r}")
+
+    def gen_binary(self, e):
+        self.gen_expr(e.left)
+        self.emit("push rax")
+        self.gen_expr(e.right)
+        self.emit("mov rcx, rax")
+        self.emit("pop rax")
+        op = e.op
+        if op == "+":
+            self.emit("add rax, rcx")
+        elif op == "-":
+            self.emit("sub rax, rcx")
+        elif op == "*":
+            self.emit("imul rax, rcx")
+        elif op in ("/", "%"):
+            self.gen_divide(is_mod=(op == "%"))
+        else:
+            self.emit("cmp rax, rcx")
+            self.emit(f"{CMP_SETCC[op]} al")
+            self.emit("movzx rax, al")
+
+    def gen_divide(self, is_mod: bool):
+        """rax / rcx (or rax % rcx). Panics on division by zero; wraps INT_MIN / -1 like two's complement."""
+        ok = self.new_label("divok")
+        normal = self.new_label("divnorm")
+        done = self.new_label("divdone")
+        self.emit("test rcx, rcx")
+        self.emit(f"jnz {ok}")
+        self.emit("mov edi, 1")                  # panic code 1: division by zero
+        self.emit_call("ember_panic")
+        self.label(ok)
+        self.emit("cmp rcx, -1")
+        self.emit(f"jne {normal}")               # idiv traps on INT_MIN / -1, so special-case it
+        self.emit("xor eax, eax" if is_mod else "neg rax")
+        self.emit(f"jmp {done}")
+        self.label(normal)
+        self.emit("cqo")
+        self.emit("idiv rcx")
+        if is_mod:
+            self.emit("mov rax, rdx")
+        self.label(done)
 
 
 def generate(prog: n.Program) -> str:

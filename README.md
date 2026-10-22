@@ -3,9 +3,9 @@
 [![ci](https://github.com/enderman-claude/ember/actions/workflows/ci.yml/badge.svg)](https://github.com/enderman-claude/ember/actions/workflows/ci.yml)
 
 Ember is a small, statically typed language with Python-style syntax. It compiles
-directly to native x86-64 assembly: no interpreter, no bytecode, no virtual machine, no
-garbage collector. The compiler writes NASM, assembles it, and links it against a
-small C runtime.
+directly to native x86-64 or AArch64 assembly: no interpreter, no bytecode, no virtual
+machine, no garbage collector. The compiler writes assembly (NASM for x86-64, GNU assembler
+syntax for AArch64), assembles it, and links it against a small C runtime.
 
 ```python
 def fib(n: i64) -> i64:
@@ -47,6 +47,31 @@ Or run it from a clone without installing:
 git clone https://github.com/enderman-claude/ember.git && cd ember
 python -m ember run examples/fib.em
 ```
+
+## ARM64 (AArch64) Linux
+
+`--target linux-arm64` produces an AArch64 ELF executable with the same language, runtime and
+behaviour as the x86-64 build. Its generated assembly uses the AAPCS64 calling convention and
+GNU assembler syntax, so it needs no NASM: gcc assembles and links it.
+
+On an ARM64 Linux machine, build with the native `cc`:
+
+```
+ember build examples/fib.em --target linux-arm64 -o fib
+./fib
+```
+
+On an x86-64 machine, install the GNU cross compiler and qemu-user to build and run it:
+
+```
+sudo apt-get install gcc-aarch64-linux-gnu qemu-user
+ember build examples/fib.em --target linux-arm64 -o fib
+qemu-aarch64 -L /usr/aarch64-linux-gnu ./fib
+```
+
+The cross compiler is `aarch64-linux-gnu-gcc` by default. Set `EMBER_ARM64_CC` to use a
+different one. `ember run` always runs on the host, so use `build` and then run the
+executable for AArch64. Window builtins are not available on this target.
 
 ## Windows programs
 
@@ -93,7 +118,8 @@ ember run prog.em --link impl.c --link -lm
 
 ```
 ember check      prog.em                 type-check only
-ember build      prog.em -o prog         produce a native executable (--target windows for .exe)
+ember build      prog.em -o prog         produce a native executable (--target windows for .exe,
+                                         --target linux-arm64 for AArch64)
 ember run        prog.em                 compile and run (stdin and exit code pass through)
 ember emit-asm   prog.em                 print the generated NASM assembly
 ```
@@ -238,7 +264,9 @@ have an `.in` file for stdin. Highlights:
 - `windows/window_test.em`: animated window (Windows target)
 - `graphics/graphics_test.em`: renders a framebuffer and writes a BMP to stdout (open the output in any image viewer)
 
-Run the whole suite with `python -m unittest discover -s tests -v`.
+Run the whole suite with `python -m unittest discover -s tests -v`. The AArch64 tests run
+every example as an ARM64 executable, under qemu-user on x86-64 hosts or natively on ARM64,
+and are skipped when neither is available.
 
 ## Implementation
 
@@ -246,6 +274,8 @@ Run the whole suite with `python -m unittest discover -s tests -v`.
 source ─► lexer ─► parser ─► checker ─► codegen ─► nasm ─► cc (+ runtime) ─► executable
           tokens    AST       checked     .asm       .o
                               AST
+
+linux-arm64:  checker ─► codegen_arm64 ─► cc (+ runtime) ─► executable      (.s, no nasm)
 ```
 
 | Module | Responsibility |
@@ -255,6 +285,7 @@ source ─► lexer ─► parser ─► checker ─► codegen ─► nasm ─�
 | `ember/nodes.py` | AST dataclasses. |
 | `ember/checker.py` | Entry-point rule, scopes, types, mutability, and return-path analysis. |
 | `ember/codegen.py` | x86-64 code generation. Results go in `rax`. Each local has a frame slot. |
+| `ember/codegen_arm64.py` | AArch64 code generation (AAPCS64, GNU assembler syntax). Results go in `x0`. |
 | `ember/runtime/ember_rt.c` | C `main`, panics, arrays, I/O. |
 | `ember/driver.py` | Runs the toolchain and manages temporary files. |
 | `ember/cli.py` | Command-line interface. |
@@ -288,7 +319,8 @@ python -m unittest discover -s tests -v
 
 The tests cover the lexer, parser, entry-point rules, type errors, code generation, the CLI,
 runtime panics, and every program in `examples/`. Programs are compiled, run, and their
-output compared with `.out` files. The end-to-end tests are skipped if `nasm` or `cc` is missing.
+output compared with `.out` files. The end-to-end tests are skipped if `nasm` or `cc` is missing. The AArch64 tests are skipped
+unless an AArch64 compiler and either an ARM64 host or qemu-aarch64 are available.
 CI runs the same command on every push.
 
 ## License

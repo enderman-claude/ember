@@ -1,11 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 ### Added
 - `--target shard`: builds a SHARD image (tesseraOS native format) through `elfpack`
 - `ember/runtime/ember_rt_shard.c`: freestanding runtime that makes system calls directly, with no libc
 - `tests/test_shard.py`: runs SHARD builds through `shardelf` and compares output with the Linux build
+- `--target linux-arm64`: builds an AArch64 (ARM64) Linux executable. The new backend is
+  `ember/codegen_arm64.py`, using AAPCS64 and GNU assembler syntax. It needs no NASM: gcc
+  assembles and links the output.
+- `EMBER_ARM64_CC` overrides the compiler used for AArch64 builds. By default the native `cc`
+  is used on ARM64 hosts and `aarch64-linux-gnu-gcc` elsewhere.
+- `tests/test_arm64.py`: compile-level checks, plus every example run as an AArch64 executable
+  under qemu-user or natively on ARM64
+
+### Changed
+- CI installs the AArch64 cross compiler and qemu-user, so the AArch64 tests run on every push
 
 ## 0.5.0
 

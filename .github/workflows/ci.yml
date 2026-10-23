@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: install nasm
-        run: sudo apt-get update && sudo apt-get install -y nasm gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 file
+        run: sudo apt-get update && sudo apt-get install -y nasm gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 file gcc-aarch64-linux-gnu qemu-user
       - uses: actions/checkout@v4
         with:
           repository: enderman-claude/shard

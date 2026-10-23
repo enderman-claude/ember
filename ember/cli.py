@@ -17,7 +17,7 @@ def main(argv=None) -> int:
     p_build.add_argument("file")
     p_build.add_argument("-o", "--output", help="output path (default: source name without .em, plus .exe on Windows)")
     p_build.add_argument("--target", choices=TARGETS, default="linux",
-                         help="linux (ELF) or windows (.exe, GUI subsystem)")
+                         help="linux (x86-64 ELF), windows (.exe, GUI subsystem) or linux-arm64 (AArch64 ELF)")
     p_build.add_argument("--link", action="append", default=[], metavar="FILE",
                          help="C source, object or linker flag (e.g. -lm); repeatable")
 

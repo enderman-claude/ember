@@ -14,5 +14,14 @@ jobs:
           python-version: "3.12"
       - name: install nasm
         run: sudo apt-get update && sudo apt-get install -y nasm gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 file
+      - uses: actions/checkout@v4
+        with:
+          repository: enderman-claude/shard
+          path: shard
+      - name: build shard tools
+        run: make -C shard build/elfpack build/shardelf
       - name: run tests
+        env:
+          EMBER_ELFPACK: ${{ github.workspace }}/shard/build/elfpack
+          EMBER_SHARDELF: ${{ github.workspace }}/shard/build/shardelf
         run: python -m unittest discover -s tests -v

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `--target shard`: builds a SHARD image (tesseraOS native format) through `elfpack`
+- `ember/runtime/ember_rt_shard.c`: freestanding runtime that makes system calls directly, with no libc
+- `tests/test_shard.py`: runs SHARD builds through `shardelf` and compares output with the Linux build
+
 ## 0.5.0
 
 ### Added

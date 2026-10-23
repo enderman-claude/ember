@@ -57,7 +57,7 @@ class CodeGen:
                 self.lines.append(f"extern {f.name}")
             else:
                 self.gen_function(f)
-        if target == "linux":
+        if target != "windows":
             self.lines.append("section .note.GNU-stack noalloc noexec nowrite progbits")
         return "\n".join(self.lines) + "\n"
 

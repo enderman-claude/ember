@@ -70,6 +70,22 @@ A framebuffer is an `[i64]` array with one `0xRRGGBB` value per pixel, row by ro
 top. Its length must be at least the window's pixel count. `examples/windows/window_test.em`
 animates a gradient with a moving circle.
 
+## SHARD images
+
+`--target shard` produces a SHARD image, the native binary format of tesseraOS (see
+[enderman-claude/shard](https://github.com/enderman-claude/shard)). The program is compiled
+to a freestanding static-pie ELF, which talks to the kernel directly instead of using libc,
+then packed with `elfpack`. Install `elfpack` from the shard repo, put it on `PATH` or set
+`EMBER_ELFPACK`.
+
+```
+ember build examples/fib.em --target shard -o fib.shard
+```
+
+SHARD has no dynamic linking, so `extern def`, `--link`, and the window builtins are not
+available for this target. Everything else works the same as on Linux, including arrays,
+`read_int`, and panics (exit code 101).
+
 ## Calling C
 
 `extern def` declares a C function. Ember passes `i64` and `bool` arguments using the platform

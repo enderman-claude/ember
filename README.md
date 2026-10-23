@@ -307,6 +307,12 @@ runtime panics, and every program in `examples/`. Programs are compiled, run, an
 output compared with `.out` files. The end-to-end tests are skipped if `nasm` or `cc` is missing.
 CI runs the same command on every push.
 
+## Related repos
+
+- [tesseraOS](https://github.com/enderman-claude/tesseraOS): the OS that runs SHARD images built by this compiler.
+- [shard](https://github.com/enderman-claude/shard): the packer and loader. `--target shard` uses `elfpack`, and `shardelf` runs the result on Linux.
+- [ember-gfx](https://github.com/enderman-claude/ember-gfx): the 2D graphics stack for Ember programs (X11, Win32 and headless backends).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

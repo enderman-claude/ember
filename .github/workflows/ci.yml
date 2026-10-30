@@ -20,6 +20,12 @@ jobs:
           path: shard
       - name: build shard tools
         run: make -C shard build/elfpack build/shardelf
+      - name: install llvm-mingw (Windows ARM64 cross compiler, pinned and checked)
+        run: |
+          curl -sSL -o llvm-mingw.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64.tar.xz
+          echo "55064b60b991a1e1e8090b8c2f84e82b22cfe5903d12c159d65064cf5e8ae335  llvm-mingw.tar.xz" | sha256sum -c -
+          tar -xJf llvm-mingw.tar.xz -C "$HOME"
+          echo "$HOME/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64/bin" >> "$GITHUB_PATH"
       - name: run tests
         env:
           EMBER_ELFPACK: ${{ github.workspace }}/shard/build/elfpack

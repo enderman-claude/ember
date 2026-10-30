@@ -17,7 +17,8 @@ def main(argv=None) -> int:
     p_build.add_argument("file")
     p_build.add_argument("-o", "--output", help="output path (default: source name without .em, plus .exe on Windows)")
     p_build.add_argument("--target", choices=TARGETS, default="linux",
-                         help="linux (x86-64 ELF), windows (.exe, GUI subsystem) or linux-arm64 (AArch64 ELF)")
+                         help="linux (x86-64 ELF), windows (.exe, GUI subsystem), linux-arm64 (AArch64 ELF), "
+                              "windows-arm64 (AArch64 .exe), or shard")
     p_build.add_argument("--link", action="append", default=[], metavar="FILE",
                          help="C source, object or linker flag (e.g. -lm); repeatable")
 
@@ -44,7 +45,7 @@ def main(argv=None) -> int:
         elif args.cmd == "emit-asm":
             print(compile_to_asm(src_path.read_text(), args.target), end="")
         elif args.cmd == "build":
-            default = src_path.with_suffix(".exe" if args.target == "windows" else "")
+            default = src_path.with_suffix(".exe" if args.target.startswith("windows") else "")
             out = Path(args.output) if args.output else default
             build(src_path, out, args.target, link=args.link)
             print(f"built {out}")

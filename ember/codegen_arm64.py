@@ -8,11 +8,18 @@ compiler temporary) gets a dedicated 8-byte frame slot addressed from the frame 
 Scratch registers: x9 is free for temporaries, x16 (IP0) is used to reach frame slots whose
 offset is too large for the single-instruction addressing form.
 """
+from . import floats
 from . import nodes as n
+from .checker import CONVERSION_SYMBOL, FLOAT_TYPES
 
 ARG_REGS = ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"]
 CMP_COND = {"==": "eq", "!=": "ne", "<": "lt", "<=": "le", ">": "gt", ">=": "ge"}
 UNSCALED_LIMIT = 256       # ldur/stur reach -256..255 from the frame pointer
+BIG_OPS = {"+": "ember_big_add", "-": "ember_big_sub", "*": "ember_big_mul", "/": "ember_big_div"}
+CONVERSION_CODES = {"i64": 0, "f32": 1, "f64": 2, "bigfloat": 3}   # ember_num.h EMBER_T_*
+# Float comparisons. a < b is computed as b > a, and so on, so that NaN (unordered) gives false.
+FCMP = {"<": ("b", "a", "gt"), "<=": ("b", "a", "ge"), ">": ("a", "b", "gt"),
+        ">=": ("a", "b", "ge"), "==": ("a", "b", "eq"), "!=": ("a", "b", "ne")}
 
 
 def align16(x: int) -> int:
@@ -27,6 +34,7 @@ class CodeGenArm64:
         self.nslots = 0
         self.ret_label = ""
         self.loops = []          # stack of (continue_label, break_label)
+        self.strings = []        # (label, text) for bigfloat literals, emitted in .rodata
 
     # -- output helpers -------------------------------------------------------
     def emit(self, text):
@@ -69,6 +77,10 @@ class CodeGenArm64:
         for f in prog.funcs:
             if f.body is not None:               # extern functions are resolved by the linker
                 self.gen_function(f)
+        if self.strings:
+            self.lines.append(".section .rodata")
+            for label, text in self.strings:
+                self.lines.append(f'{label}: .asciz "{text}"')
         self.lines.append('.section .note.GNU-stack,"",@progbits')
         return "\n".join(self.lines) + "\n"
 
@@ -228,20 +240,48 @@ class CodeGenArm64:
             self.gen_expr(s.expr)
 
     # -- expressions (result in x0) --------------------------------------------
+    def load_imm(self, reg, value):
+        """Loads any 64-bit constant with movz/movk (one instruction per non-zero 16-bit part).
+
+        GNU as cannot move every 64-bit immediate with a single `mov`, so this is explicit.
+        """
+        v = value & 0xFFFFFFFFFFFFFFFF
+        parts = [(shift, (v >> shift) & 0xFFFF) for shift in (0, 16, 32, 48)]
+        parts = [(sh, p) for sh, p in parts if p] or [(0, 0)]
+        first = True
+        for shift, part in parts:
+            suffix = f", lsl #{shift}" if shift else ""
+            if first:
+                self.emit(f"movz {reg}, #{part}{suffix}")
+                first = False
+            else:
+                self.emit(f"movk {reg}, #{part}{suffix}")
+
     def gen_expr(self, e):
         if isinstance(e, n.IntLit):
-            self.emit(f"mov x0, #{e.value}")
+            self.load_imm("x0", e.value)
 
         elif isinstance(e, n.BoolLit):
             self.emit(f"mov x0, #{1 if e.value else 0}")
+
+        elif isinstance(e, n.FloatLit):
+            self.gen_float_lit(e)
 
         elif isinstance(e, n.Name):
             self.load_slot("x0", self.lookup(e.name))
 
         elif isinstance(e, n.Unary):
+            if e.op == "-" and e.ty == "bigfloat":
+                self.gen_call([e.operand], "ember_big_neg")
+                return
             self.gen_expr(e.operand)
             if e.op == "-":
-                self.emit("neg x0, x0")
+                if e.ty == "f64":
+                    self.emit("eor x0, x0, #0x8000000000000000")   # flip the sign bit
+                elif e.ty == "f32":
+                    self.emit("eor w0, w0, #0x80000000")
+                else:
+                    self.emit("neg x0, x0")
             else:
                 self.emit("eor x0, x0, #1")      # bools are always 0 or 1
 
@@ -257,7 +297,10 @@ class CodeGenArm64:
                 self.gen_binary(e)
 
         elif isinstance(e, n.Call):
-            self.gen_call(e.args, e.symbol)
+            if e.symbol == CONVERSION_SYMBOL:
+                self.gen_conversion(e)
+            else:
+                self.gen_call(e.args, e.symbol)
 
         elif isinstance(e, n.Index):
             self.gen_call([e.target, e.index], "ember_load")
@@ -277,7 +320,66 @@ class CodeGenArm64:
         else:
             raise AssertionError(f"codegen: unknown expression {e!r}")
 
+    def gen_float_lit(self, e):
+        if e.kind == "bigfloat":
+            label = f".Lbigstr{self.label_count}"
+            self.label_count += 1
+            self.strings.append((label, e.text))
+            self.emit(f"adrp x0, {label}")
+            self.emit(f"add x0, x0, :lo12:{label}")
+            self.emit("bl ember_big_parse")
+        else:
+            self.load_imm("x0", floats.literal_bits(e.text, e.kind))
+
+    def gen_conversion(self, e):
+        src, dst = e.args[0].ty, e.ty
+        if src == dst:
+            self.gen_expr(e.args[0])
+        else:
+            self.gen_call([e.args[0], n.IntLit(e.line, CONVERSION_CODES[src]),
+                           n.IntLit(e.line, CONVERSION_CODES[dst])], CONVERSION_SYMBOL)
+
+    def gen_big_binary(self, e):
+        """bigfloat: the runtime does the exact arithmetic; the result is a handle or a sign."""
+        if e.op in BIG_OPS:
+            self.gen_call([e.left, e.right], BIG_OPS[e.op])
+            return
+        self.gen_call([e.left, e.right], "ember_big_cmp")
+        self.emit("cmp x0, #0")
+        self.emit(f"cset x0, {CMP_COND[e.op]}")
+
+    def gen_float_binary(self, e):
+        """f32 and f64: IEEE operations in the floating-point registers."""
+        self.gen_expr(e.left)
+        self.push("x0")
+        self.gen_expr(e.right)
+        self.emit("mov x1, x0")
+        self.pop("x0")
+        if e.left.ty == "f64":
+            self.emit("fmov d0, x0")
+            self.emit("fmov d1, x1")
+            regs, fcmp_reg = "d", "d"
+        else:
+            self.emit("fmov s0, w0")
+            self.emit("fmov s1, w1")
+            regs, fcmp_reg = "s", "s"
+        op = e.op
+        if op in ("+", "-", "*", "/"):
+            name = {"+": "fadd", "-": "fsub", "*": "fmul", "/": "fdiv"}[op]
+            self.emit(f"{name} {regs}0, {regs}0, {regs}1")
+            self.emit("fmov x0, d0" if regs == "d" else "fmov w0, s0")
+            return
+        lhs, rhs, cond = FCMP[op]
+        left_reg = {"a": "0", "b": "1"}[lhs]
+        right_reg = {"a": "0", "b": "1"}[rhs]
+        self.emit(f"fcmp {fcmp_reg}{left_reg}, {fcmp_reg}{right_reg}")
+        self.emit(f"cset x0, {cond}")
+
     def gen_binary(self, e):
+        if e.left.ty == "bigfloat":
+            return self.gen_big_binary(e)
+        if e.left.ty in FLOAT_TYPES:
+            return self.gen_float_binary(e)
         self.gen_expr(e.left)
         self.push("x0")
         self.gen_expr(e.right)

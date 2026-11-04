@@ -5,7 +5,9 @@ operand to the stack. Each local (and each compiler temporary) gets a dedicated
 8-byte frame slot. Calls into the runtime go through emit_call, which keeps rsp
 16-byte aligned regardless of how deep the expression stack is.
 """
+from . import floats
 from . import nodes as n
+from .checker import CONVERSION_SYMBOL, FLOAT_TYPES
 
 SYSV_ARG_REGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]   # Linux (System V)
 WIN_ARG_REGS = ["rcx", "rdx", "r8", "r9"]                   # Windows x64
@@ -14,7 +16,12 @@ RUNTIME_SYMBOLS = [
     "ember_print_i64", "ember_print_bool", "ember_alloc", "ember_free", "ember_len",
     "ember_load", "ember_store", "ember_read_int", "ember_input_ended", "ember_put_byte",
     "ember_panic",
+    "ember_print_f32", "ember_print_f64", "ember_print_big",
+    "ember_big_parse", "ember_big_neg", "ember_big_add", "ember_big_sub", "ember_big_mul",
+    "ember_big_div", "ember_big_cmp", "ember_convert",
 ]
+BIG_OPS = {"+": "ember_big_add", "-": "ember_big_sub", "*": "ember_big_mul", "/": "ember_big_div"}
+CONVERSION_CODES = {"i64": 0, "f32": 1, "f64": 2, "bigfloat": 3}   # ember_num.h EMBER_T_*
 WINDOW_SYMBOLS = ["ember_window_open", "ember_window_present", "ember_window_closed"]
 
 
@@ -32,6 +39,7 @@ class CodeGen:
         self.loops = []          # stack of (continue_label, break_label)
         self.target = "linux"
         self.arg_regs = SYSV_ARG_REGS
+        self.strings = []        # (label, text) for bigfloat literals, emitted in .rodata
 
     # -- output helpers -------------------------------------------------------
     def emit(self, text):
@@ -57,6 +65,10 @@ class CodeGen:
                 self.lines.append(f"extern {f.name}")
             else:
                 self.gen_function(f)
+        if self.strings:
+            self.lines.append("section .rodata")
+            for label, text in self.strings:
+                self.lines.append(f'{label}: db "{text}", 0')
         if target != "windows":
             self.lines.append("section .note.GNU-stack noalloc noexec nowrite progbits")
         return "\n".join(self.lines) + "\n"
@@ -228,13 +240,24 @@ class CodeGen:
         elif isinstance(e, n.BoolLit):
             self.emit(f"mov rax, {1 if e.value else 0}")
 
+        elif isinstance(e, n.FloatLit):
+            self.gen_float_lit(e)
+
         elif isinstance(e, n.Name):
             self.emit(f"mov rax, [rbp-{self.lookup(e.name)}]")
 
         elif isinstance(e, n.Unary):
+            if e.op == "-" and e.ty == "bigfloat":
+                self.gen_call([e.operand], "ember_big_neg")
+                return
             self.gen_expr(e.operand)
             if e.op == "-":
-                self.emit("neg rax")
+                if e.ty == "f64":
+                    self.emit("btc rax, 63")     # flip the sign bit: keeps -0.0 and NaN payloads
+                elif e.ty == "f32":
+                    self.emit("xor eax, 0x80000000")
+                else:
+                    self.emit("neg rax")
             else:
                 self.emit("xor rax, 1")          # bools are always 0 or 1
 
@@ -251,7 +274,10 @@ class CodeGen:
                 self.gen_binary(e)
 
         elif isinstance(e, n.Call):
-            self.gen_call(e.args, e.symbol)
+            if e.symbol == CONVERSION_SYMBOL:
+                self.gen_conversion(e)
+            else:
+                self.gen_call(e.args, e.symbol)
 
         elif isinstance(e, n.Index):
             self.gen_call([e.target, e.index], "ember_load")
@@ -272,7 +298,29 @@ class CodeGen:
         else:
             raise AssertionError(f"codegen: unknown expression {e!r}")
 
+    def gen_float_lit(self, e):
+        if e.kind == "bigfloat":
+            label = f"ember_bigstr_{self.label_count}"
+            self.label_count += 1
+            self.strings.append((label, e.text))
+            self.emit(f"lea {self.arg_regs[0]}, [rel {label}]")
+            self.emit_call("ember_big_parse")
+        else:
+            self.emit(f"mov rax, {floats.literal_bits(e.text, e.kind)}")
+
+    def gen_conversion(self, e):
+        src, dst = e.args[0].ty, e.ty
+        if src == dst:
+            self.gen_expr(e.args[0])
+        else:
+            self.gen_call([e.args[0], n.IntLit(e.line, CONVERSION_CODES[src]),
+                           n.IntLit(e.line, CONVERSION_CODES[dst])], CONVERSION_SYMBOL)
+
     def gen_binary(self, e):
+        if e.left.ty == "bigfloat":
+            return self.gen_big_binary(e)
+        if e.left.ty in FLOAT_TYPES:
+            return self.gen_float_binary(e)
         self.gen_expr(e.left)
         self.emit("push rax")
         self.gen_expr(e.right)
@@ -291,6 +339,56 @@ class CodeGen:
             self.emit("cmp rax, rcx")
             self.emit(f"{CMP_SETCC[op]} al")
             self.emit("movzx rax, al")
+
+    def gen_big_binary(self, e):
+        """bigfloat: the runtime does the exact arithmetic; the result is a handle or a sign."""
+        if e.op in BIG_OPS:
+            self.gen_call([e.left, e.right], BIG_OPS[e.op])
+            return
+        self.gen_call([e.left, e.right], "ember_big_cmp")
+        self.emit("cmp rax, 0")
+        self.emit(f"{CMP_SETCC[e.op]} al")
+        self.emit("movzx rax, al")
+
+    def gen_float_binary(self, e):
+        """f32 and f64: IEEE operations in SSE registers. Each value is its bit pattern in rax."""
+        self.gen_expr(e.left)
+        self.emit("push rax")
+        self.gen_expr(e.right)
+        self.emit("mov rcx, rax")
+        self.emit("pop rax")
+        if e.left.ty == "f64":
+            self.emit("movq xmm0, rax")
+            self.emit("movq xmm1, rcx")
+            sfx, ucom = "sd", "ucomisd"
+        else:
+            self.emit("movd xmm0, eax")
+            self.emit("movd xmm1, ecx")
+            sfx, ucom = "ss", "ucomiss"
+        op = e.op
+        if op in ("+", "-", "*", "/"):
+            name = {"+": "add", "-": "sub", "*": "mul", "/": "div"}[op]
+            self.emit(f"{name}{sfx} xmm0, xmm1")
+            self.emit("movq rax, xmm0" if sfx == "sd" else "movd eax, xmm0")
+            return
+        # Ordered comparisons are written so that NaN makes them false. a < b is tested as b > a.
+        if op in ("<", "<="):
+            self.emit(f"{ucom} xmm1, xmm0")
+            self.emit("seta al" if op == "<" else "setae al")
+        elif op in (">", ">="):
+            self.emit(f"{ucom} xmm0, xmm1")
+            self.emit("seta al" if op == ">" else "setae al")
+        elif op == "==":
+            self.emit(f"{ucom} xmm0, xmm1")
+            self.emit("sete al")
+            self.emit("setnp cl")                # equal and not unordered
+            self.emit("and al, cl")
+        else:                                    # !=: NaN is not equal to anything
+            self.emit(f"{ucom} xmm0, xmm1")
+            self.emit("setne al")
+            self.emit("setp cl")
+            self.emit("or al, cl")
+        self.emit("movzx rax, al")
 
     def gen_divide(self, is_mod: bool):
         """rax / rcx (or rax % rcx). Panics on division by zero; wraps INT_MIN / -1 like two's complement."""

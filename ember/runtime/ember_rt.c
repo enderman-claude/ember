@@ -17,6 +17,8 @@
 #include <windows.h>
 #endif
 
+#include "ember_num.h"
+
 extern void em_main(void);
 
 static int input_ended_flag = 0;
@@ -31,6 +33,8 @@ void ember_panic(int64_t code) {
         case 4:  msg = "invalid array handle"; break;
         case 5:  msg = "window is not open"; break;
         case 6:  msg = "framebuffer is smaller than the window"; break;
+        case 7:  msg = "float value does not fit in i64"; break;
+        case 8:  msg = "cannot convert NaN or infinity to bigfloat"; break;
         default: msg = "runtime error"; break;
     }
 #ifdef _WIN32
@@ -52,6 +56,36 @@ void ember_print_bool(int64_t value) {
 }
 
 /* Writes one raw byte to stdout. Used for binary output such as BMP files. */
+/* Numbers: print the owned, formatted string and free it. */
+static void print_owned(char *s) {
+    puts(s);
+    free(s);
+}
+
+void ember_print_f32(int64_t bits) {
+    print_owned(ember_fmt_f32((uint64_t)bits));
+}
+
+void ember_print_f64(int64_t bits) {
+    print_owned(ember_fmt_f64((uint64_t)bits));
+}
+
+void ember_print_big(int64_t handle) {
+    print_owned(ember_fmt_big(handle));
+}
+
+void *ember_num_alloc(size_t bytes) {
+    void *p = malloc(bytes);
+    if (p == NULL) {
+        ember_panic(3);
+    }
+    return p;
+}
+
+void ember_num_free(void *p) {
+    free(p);
+}
+
 void ember_put_byte(int64_t value) {
     putchar((int)(value & 0xFF));
 }

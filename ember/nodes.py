@@ -12,6 +12,14 @@ class IntLit:
 
 
 @dataclass
+class FloatLit:
+    """A decimal literal such as 1.5. kind is "f64", "f32" or "bigfloat"."""
+    line: int
+    text: str
+    kind: str
+
+
+@dataclass
 class BoolLit:
     line: int
     value: bool

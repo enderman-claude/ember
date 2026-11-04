@@ -114,7 +114,8 @@ available for this target. Everything else works the same as on Linux, including
 ## Calling C
 
 `extern def` declares a C function. Ember passes `i64` and `bool` arguments using the platform
-calling convention, so the function can be written in C:
+calling convention, so the function can be written in C. Floats and bigfloats cannot cross
+this boundary: convert them to `i64` first.
 
 ```python
 extern def c_add(a: i64, b: i64) -> i64
@@ -167,11 +168,35 @@ def main():
 | Type | Meaning |
 |---|---|
 | `i64` | 64-bit signed integer. Arithmetic wraps on overflow. |
+| `f64` | 64-bit IEEE 754 float. The type of a decimal literal such as `1.5`. |
+| `f32` | 32-bit IEEE 754 float. Written with the suffix `f32`, as in `1.5f32`. |
+| `bigfloat` | Exact rational number of any size, such as `100big / 3big`. Written with the suffix `big`. |
 | `bool` | `true` or `false` |
 | `[i64]` | Heap array of `i64`, bounds-checked, created with `alloc` or a literal |
 | `unit` | The type of a function with no `->` clause. It has no value and can't be bound. |
 
-Types are never converted implicitly. `1 + true` is an error.
+Types are never converted implicitly. `1 + true` is an error, and so is `1 + 2.0`. Use a
+conversion function to change a number's type: `f64(3)`, `f32(x)`, `bigfloat(x)`, `i64(x)`.
+
+### Numbers
+
+Literals: `1.5` is `f64`, `1.5f32` is `f32`, `1.5big` is `bigfloat`, and an integer with a
+suffix is a number of that type too (`2big`). Underscores are allowed (`1_000.5`).
+
+`f32` and `f64` follow IEEE 754: arithmetic rounds to nearest, `1.0 / 0.0` is `inf`, and
+`0.0 / 0.0` is NaN, which is not equal to anything. Converting a float to `i64` truncates
+toward zero and panics if the value does not fit. `%` is for `i64` only.
+
+`bigfloat` is exact. Each value is a fraction kept in lowest terms, so `100big / 3big` is
+stored as 100/3 and never rounded. Arithmetic and comparisons are exact. Division by zero
+panics. A `bigfloat` has no negative zero. Converting a `bigfloat` to `f64` or `f32` rounds
+to the nearest value. Bigfloat values are not freed, so a loop that creates many of them
+keeps the memory until the program exits.
+
+Printing a number gives the shortest decimal that reads back as the same value, with the same
+plain/scientific rules as Python's `repr`: `0.1`, `1e-05`, `1.2345678901234567e+19`. A
+`bigfloat` prints exactly when its decimal expansion ends, and otherwise with 40 digits and
+`...`: `100big / 3big` prints `33.3333333333333333333333333333333333333333...`.
 
 ### Bindings and assignment
 
@@ -204,9 +229,9 @@ From highest to lowest precedence:
 | Operators | Notes |
 |---|---|
 | unary `-` | `i64` |
-| `*` `/` `%` | `/` and `%` truncate toward zero. Division by zero panics. |
-| `+` `-` | `i64` |
-| `==` `!=` `<` `<=` `>` `>=` | Don't chain. `a < b < c` is an error. |
+| `*` `/` `%` | `i64`, `f32`, `f64` or `bigfloat`, the same type on both sides. `%` is `i64` only. `/` and `%` truncate toward zero. Integer division by zero panics. |
+| `+` `-` | `i64`, `f32`, `f64` or `bigfloat`, the same type on both sides |
+| `==` `!=` `<` `<=` `>` `>=` | Same type on both sides. Don't chain. `a < b < c` is an error. |
 | `not` | `bool` |
 | `and` | `bool`, short-circuit |
 | `or` | `bool`, short-circuit |
@@ -258,7 +283,8 @@ it twice, is undefined behavior. A future version will add ownership rules that 
 
 | Function | Signature | Description |
 |---|---|---|
-| `print` | `i64 \| bool -> unit` | Writes the value and a newline to stdout |
+| `print` | `i64 \| bool \| f32 \| f64 \| bigfloat -> unit` | Writes the value and a newline to stdout |
+| `i64`, `f32`, `f64`, `bigfloat` | `number -> number` | Converts between number types (see Numbers) |
 | `alloc` | `i64 -> [i64]` | Allocates a zeroed array of the given length |
 | `free` | `[i64] -> unit` | Releases an array |
 | `len` | `[i64] -> i64` | Returns the array length |
@@ -322,7 +348,7 @@ next step.
 
 ## Not yet implemented
 
-Structs and enums, `match`, strings and floating-point numbers, generics, `Option`/`Result`,
+Structs and enums, `match`, strings, arrays of floats, exponent notation (`1e10`), generics, `Option`/`Result`,
 ownership and automatic memory management, modules and imports, inline assembly, and an
 `unsafe` pointer model. These are on the roadmap. The sample programs use only what the
 current compiler supports.

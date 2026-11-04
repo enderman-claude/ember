@@ -74,7 +74,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsNotNone(prog.funcs[0].body[0].else_body)
 
     def test_unknown_type_rejected(self):
-        self.assertIn("unknown type", compile_error("def main(x: f64):\n    print(1)\n").msg)
+        self.assertIn("unknown type", compile_error("def main(x: string):\n    print(1)\n").msg)
 
     def test_only_i64_arrays(self):
         self.assertIn("only arrays of i64", compile_error("def main(x: [bool]):\n    print(1)\n").msg)
@@ -131,7 +131,7 @@ class TypeCheckTests(unittest.TestCase):
         compile_to_asm(body("print(true)"))
 
     def test_print_array_rejected(self):
-        self.assertError(body("print(alloc(2))"), "print() takes i64 or bool")
+        self.assertError(body("print(alloc(2))"), "print() takes i64, bool, f32, f64 or bigfloat")
 
     def test_if_condition_must_be_bool(self):
         self.assertError(body("if 1:\n    print(1)"), "if condition")

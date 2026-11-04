@@ -249,6 +249,43 @@ class RuntimeUnits(unittest.TestCase):
             self.assertIn("all numeric checks passed", proc.stdout)
 
 
+HAVE_WINE = bool(shutil.which("wine") and shutil.which("nasm") and shutil.which("x86_64-w64-mingw32-gcc"))
+
+
+@unittest.skipUnless(HAVE_WINE, "needs wine, nasm and the MinGW compiler")
+class WindowsRun(unittest.TestCase):
+    """Runs the float examples as Windows programs under wine.
+
+    The driver links Windows programs as GUI applications, which have no console for print,
+    so this test links the same code as a console program. Console output uses CRLF line
+    endings on Windows (as integer printing always has); the comparison ignores them.
+    """
+
+    def build_console(self, em, exe):
+        asm = compile_to_asm(em.read_text(), "windows")
+        obj = exe.with_suffix(".obj")
+        asm_file = exe.with_suffix(".asm")
+        asm_file.write_text(asm)
+        subprocess.run(["nasm", "-f", "win64", "-Werror", "-o", str(obj), str(asm_file)],
+                       check=True, capture_output=True, text=True)
+        subprocess.run(["x86_64-w64-mingw32-gcc", "-O1", "-static", "-o", str(exe),
+                        str(RUNTIME / "ember_rt.c"), str(obj), "-luser32", "-lgdi32"],
+                       check=True, capture_output=True, text=True)
+
+    def test_examples_match_linux_output(self):
+        import os
+        env = dict(os.environ, WINEDEBUG="-all")
+        for name in ("floats", "bigfloat"):
+            with self.subTest(program=name), tempfile.TemporaryDirectory() as tmp:
+                exe = Path(tmp) / f"{name}.exe"
+                self.build_console(ROOT / "examples" / f"{name}.em", exe)
+                proc = subprocess.run(["wine", str(exe)], capture_output=True, text=True,
+                                      timeout=120, env=env)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(proc.stdout.replace("\r\n", "\n"),
+                                 (ROOT / "examples" / f"{name}.out").read_text())
+
+
 @unittest.skipUnless(HAVE_TOOLS and shutil.which("x86_64-w64-mingw32-gcc"), "needs the MinGW compiler")
 class StrictRuntimeBuilds(unittest.TestCase):
     def test_windows_runtime_compiles_without_warnings(self):

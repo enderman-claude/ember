@@ -91,3 +91,15 @@ class ShardRestrictionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE_TOOLS, "needs nasm, cc, elfpack and shardelf")
+class ShardNumbers(unittest.TestCase):
+    """The freestanding runtime formats numbers with the same code as the Linux runtime."""
+
+    def test_float_examples_match_linux_output(self):
+        for name in ("floats", "bigfloat"):
+            with self.subTest(program=name):
+                proc = run_shard((ROOT / "examples" / f"{name}.em").read_text())
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(proc.stdout, (ROOT / "examples" / f"{name}.out").read_text())

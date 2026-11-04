@@ -1,10 +1,18 @@
-"""Semantic checks: entry point, name resolution, and static types (i64, bool, [i64], unit)."""
+"""Semantic checks: entry point, name resolution, and static types.
+
+Types: i64, bool, f32, f64, bigfloat, [i64] and unit. Numbers never convert implicitly; the
+conversion functions named after the types (f64(x), i64(x), ...) are the only way across.
+"""
 from dataclasses import dataclass
 from .errors import CompileError
+from . import floats
 from . import nodes as n
 
 I64_MIN, I64_MAX = -(2 ** 63), 2 ** 63 - 1
 ARRAY = "[i64]"
+NUMERIC = ("i64", "f32", "f64", "bigfloat")      # types that take arithmetic and ordering
+FLOAT_TYPES = ("f32", "f64")                     # IEEE types; bigfloat is exact
+C_ABI_TYPES = ("i64", "bool", ARRAY)             # what an extern def may take and return
 
 
 MAX_PARAMS = 4   # the Windows x64 convention passes four arguments in registers
@@ -32,8 +40,13 @@ BUILTINS = {
     "window_closed": Sig([], "bool", "ember_window_closed", ("windows",)),
 }
 # print() is overloaded on its argument type.
-PRINT_SYMBOLS = {"i64": "ember_print_i64", "bool": "ember_print_bool"}
-RESERVED = set(BUILTINS) | {"print"}
+PRINT_SYMBOLS = {
+    "i64": "ember_print_i64", "bool": "ember_print_bool",
+    "f32": "ember_print_f32", "f64": "ember_print_f64", "bigfloat": "ember_print_big",
+}
+# Conversions f64(x), i64(x), ...: one runtime function that takes the source and target types.
+CONVERSION_SYMBOL = "ember_convert"
+RESERVED = set(BUILTINS) | {"print"} | set(NUMERIC)
 
 
 def check_entry_point(prog: n.Program):
@@ -85,8 +98,23 @@ class Checker:
             symbol = f.name if f.body is None else f"em_{f.name}"
             self.sigs[f.name] = Sig([p.type for p in f.params], f.ret, symbol)
         for f in self.prog.funcs:
+            if f.body is None:
+                self.check_extern_abi(f)
+        for f in self.prog.funcs:
             if f.body is not None:
                 self.check_function(f)
+
+    def check_extern_abi(self, f):
+        """C functions take i64, bool and arrays only: floats are not passed in SSE registers."""
+        for p in f.params:
+            if p.type not in ("i64", "bool", ARRAY):
+                raise CompileError(
+                    f.line, f"extern def {f.name}: parameter {p.name!r} has type {p.type}; "
+                            "C functions take i64, bool or [i64] (convert the value in Ember first)")
+        if f.ret not in C_ABI_TYPES + ("unit",):
+            raise CompileError(
+                f.line, f"extern def {f.name}: return type {f.ret} is not supported; "
+                        "C functions return i64, bool, [i64] or nothing")
 
     # -- scopes ---------------------------------------------------------------
     def lookup(self, name):
@@ -197,6 +225,12 @@ class Checker:
             raise CompileError(line, f"type mismatch in {what}: expected {want}, found {got}")
 
     def expr_type(self, e) -> str:
+        """The type of e. Also records it on the node (e.ty) for the code generators."""
+        t = self._expr_type(e)
+        e.ty = t
+        return t
+
+    def _expr_type(self, e) -> str:
         if isinstance(e, n.IntLit):
             if not I64_MIN <= e.value <= I64_MAX:
                 raise CompileError(e.line, f"integer literal {e.value} does not fit in i64")
@@ -204,6 +238,11 @@ class Checker:
 
         if isinstance(e, n.BoolLit):
             return "bool"
+
+        if isinstance(e, n.FloatLit):
+            if e.kind in FLOAT_TYPES and floats.literal_bits(e.text, e.kind) is None:
+                raise CompileError(e.line, f"float literal {e.text} does not fit in {e.kind}")
+            return e.kind
 
         if isinstance(e, n.Name):
             found = self.lookup(e.name)
@@ -216,8 +255,9 @@ class Checker:
         if isinstance(e, n.Unary):
             t = self.expr_type(e.operand)
             if e.op == "-":
-                self.require(t, "i64", e.line, "unary '-'")
-                return "i64"
+                if t not in NUMERIC:
+                    raise CompileError(e.line, f"unary '-' needs a number, found {t}")
+                return t
             self.require(t, "bool", e.line, "'not'")
             return "bool"
 
@@ -231,9 +271,14 @@ class Checker:
                 if lt != rt or lt == "unit":
                     raise CompileError(e.line, f"cannot compare {lt} with {rt}")
                 return "bool"
-            self.require(lt, "i64", e.line, f"left operand of '{e.op}'")
-            self.require(rt, "i64", e.line, f"right operand of '{e.op}'")
-            return "bool" if e.op in ("<", "<=", ">", ">=") else "i64"
+            if e.op == "%":
+                self.require(lt, "i64", e.line, f"left operand of '{e.op}'")
+                self.require(rt, "i64", e.line, f"right operand of '{e.op}'")
+                return "i64"
+            # Arithmetic and ordering need the same numeric type on both sides.
+            self.require(lt, "i64" if lt not in NUMERIC else lt, e.line, f"left operand of '{e.op}'")
+            self.require(rt, lt, e.line, f"right operand of '{e.op}'")
+            return "bool" if e.op in ("<", "<=", ">", ">=") else lt
 
         if isinstance(e, n.Index):
             self.index_check(e.target, e.index, e.line)
@@ -252,9 +297,17 @@ class Checker:
                     raise CompileError(e.line, "print() takes exactly 1 argument")
                 t = self.expr_type(e.args[0])
                 if t not in PRINT_SYMBOLS:
-                    raise CompileError(e.line, f"print() takes i64 or bool, found {t}")
+                    raise CompileError(e.line, f"print() takes i64, bool, f32, f64 or bigfloat, found {t}")
                 e.symbol = PRINT_SYMBOLS[t]
                 return "unit"
+            if e.name in NUMERIC:                       # conversion, e.g. f64(x)
+                if len(e.args) != 1:
+                    raise CompileError(e.line, f"{e.name}() takes exactly 1 argument")
+                t = self.expr_type(e.args[0])
+                if t not in NUMERIC:
+                    raise CompileError(e.line, f"cannot convert {t} to {e.name}")
+                e.symbol = CONVERSION_SYMBOL
+                return e.name
             sig = self.sigs.get(e.name)
             if sig is None:
                 raise CompileError(e.line, f"undefined function {e.name!r}")

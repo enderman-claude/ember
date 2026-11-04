@@ -12,7 +12,7 @@ OPS1 = set("+-*/%<>=():,[]")
 
 @dataclass
 class Token:
-    kind: str       # keyword text, "NAME", "INT", an operator, or NEWLINE/INDENT/DEDENT/EOF
+    kind: str       # keyword text, "NAME", "INT", "FLOAT"/"FLOAT32"/"FLOATBIG", an operator, or NEWLINE/INDENT/DEDENT/EOF
     value: str
     line: int
     col: int
@@ -60,7 +60,24 @@ def tokenize(src: str) -> list:
                 j = i
                 while j < len(body) and (body[j].isdigit() or body[j] == "_"):
                     j += 1
-                tokens.append(Token("INT", body[i:j].replace("_", ""), lineno, col))
+                is_float = False
+                if j + 1 < len(body) and body[j] == "." and body[j + 1].isdigit():
+                    j += 1
+                    while j < len(body) and (body[j].isdigit() or body[j] == "_"):
+                        j += 1
+                    is_float = True
+                text_end = j
+                kind = "FLOAT"
+                # Suffixes make a float literal: 1.5f32 (f32), 2big (bigfloat).
+                for suffix, skind in (("f32", "FLOAT32"), ("big", "FLOATBIG")):
+                    end = j + len(suffix)
+                    if body[j:end] == suffix and not (end < len(body) and (body[end].isalnum() or body[end] == "_")):
+                        kind, j, is_float = skind, end, True
+                        break
+                if is_float:
+                    tokens.append(Token(kind, body[i:text_end].replace("_", ""), lineno, col))
+                else:
+                    tokens.append(Token("INT", body[i:j].replace("_", ""), lineno, col))
                 i = j
             elif c.isalpha() or c == "_":
                 j = i

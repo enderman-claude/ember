@@ -4,7 +4,8 @@ from .lexer import tokenize
 from . import nodes as n
 
 CMP_OPS = ("==", "!=", "<", "<=", ">", ">=")
-SCALAR_TYPES = ("i64", "bool")
+SCALAR_TYPES = ("i64", "bool", "f32", "f64", "bigfloat")
+FLOAT_KINDS = {"FLOAT": "f64", "FLOAT32": "f32", "FLOATBIG": "bigfloat"}
 
 
 class Parser:
@@ -100,7 +101,7 @@ class Parser:
             return "[i64]"
         t = self.expect("NAME", "type name")
         if t.value not in SCALAR_TYPES:
-            raise CompileError(t.line, f"unknown type {t.value!r} (expected i64, bool or [i64])", t.col)
+            raise CompileError(t.line, f"unknown type {t.value!r} (expected i64, bool, f32, f64, bigfloat or [i64])", t.col)
         return t.value
 
     # -- statements -----------------------------------------------------------
@@ -273,6 +274,9 @@ class Parser:
         if t.kind == "INT":
             self.advance()
             return n.IntLit(t.line, int(t.value))
+        if t.kind in FLOAT_KINDS:
+            self.advance()
+            return n.FloatLit(t.line, t.value, FLOAT_KINDS[t.kind])
         if t.kind in ("true", "false"):
             self.advance()
             return n.BoolLit(t.line, t.kind == "true")

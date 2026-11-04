@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ember_num.h"
+
 extern void em_main(void);
 
 #define SYS_READ       0
@@ -86,6 +88,8 @@ void ember_panic(int64_t code)
         case 4:  msg = "invalid array handle"; break;
         case 5:  msg = "window is not open"; break;
         case 6:  msg = "framebuffer is smaller than the window"; break;
+        case 7:  msg = "float value does not fit in i64"; break;
+        case 8:  msg = "cannot convert NaN or infinity to bigfloat"; break;
         default: msg = "runtime error"; break;
     }
     write_all(2, "ember: panic: ", 14);
@@ -118,6 +122,59 @@ void ember_print_bool(int64_t value)
     } else {
         write_all(1, "false\n", 6);
     }
+}
+
+/* Numbers: write the formatted string and a newline. The string is not freed (see
+ * ember_num_free below). */
+static void print_line(const char *s)
+{
+    write_all(1, s, cstr_len(s));
+    write_all(1, "\n", 1);
+}
+
+void ember_print_f32(int64_t bits)
+{
+    print_line(ember_fmt_f32((uint64_t)bits));
+}
+
+void ember_print_f64(int64_t bits)
+{
+    print_line(ember_fmt_f64((uint64_t)bits));
+}
+
+void ember_print_big(int64_t handle)
+{
+    print_line(ember_fmt_big(handle));
+}
+
+/* Numeric scratch memory comes from a bump arena of anonymous mappings. Freeing is a
+ * no-op, so the arena only grows; bigfloat programs use memory in proportion to their work. */
+static char *num_arena;
+static size_t num_left;
+
+void *ember_num_alloc(size_t bytes)
+{
+    bytes = (bytes + 15) & ~(size_t)15;
+    if (bytes > num_left) {
+        size_t chunk = bytes > (1u << 20) ? (bytes + PAGE_SIZE - 1) & ~((size_t)PAGE_SIZE - 1)
+                                          : (size_t)(1u << 20);
+        long p = sys6(SYS_MMAP, 0, (long)chunk, 3 /* PROT_READ|PROT_WRITE */,
+                      0x22 /* MAP_PRIVATE|MAP_ANONYMOUS */, -1, 0);
+        if (p < 0 && p > -4096) {
+            ember_panic(3);
+        }
+        num_arena = (char *)(intptr_t)p;
+        num_left = chunk;
+    }
+    void *r = num_arena;
+    num_arena += bytes;
+    num_left -= bytes;
+    return r;
+}
+
+void ember_num_free(void *p)
+{
+    (void)p;
 }
 
 /* Writes one raw byte to stdout. Used for binary output such as BMP files. */

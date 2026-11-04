@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Floating-point types `f32` (single) and `f64` (double), with IEEE 754 arithmetic and
+  comparisons. Decimal literals are `f64` (`1.5`); `1.5f32` is `f32`.
+- `bigfloat`: an exact rational number of any size, written with the suffix `big` (`1.5big`,
+  `2big`). Values are kept in lowest terms, so `100big / 3big` stays 100/3.
+- Conversion functions `f32(x)`, `f64(x)`, `bigfloat(x)` and `i64(x)`. Numbers never convert
+  implicitly.
+- Printing for all numeric types. Floats print the shortest decimal that reads back as the same
+  value (same rules as Python's `repr`); bigfloats print exactly when the decimal ends, and
+  otherwise with 40 digits and `...`.
+- `ember/runtime/ember_num.h`: the numeric runtime, shared by the Linux, Windows and SHARD
+  runtimes. It has no libc dependency.
+- `ember/floats.py`: exact decimal-to-float conversion for literals (correct rounding, ties to even).
+- Panics for a bigfloat division by zero, a float that does not fit in `i64`, and a conversion
+  of NaN or infinity to `bigfloat`.
+- Examples `examples/floats.em` and `examples/bigfloat.em`. `tests/test_floats.py` and
+  `tests/num_test.c` (checked against expectations from `tests/gen_num_cases.py`).
+
+### Changed
+- `extern def` takes and returns only `i64`, `bool` and `[i64]`. Floats are not passed in SSE
+  registers, so a C function cannot receive them.
+- Integer and float constants are loaded with `movz`/`movk` on AArch64. Some 64-bit constants
+  cannot be moved with one `mov` (for example `0x123456789ABC`, or the bit pattern of `1.0 / 3.0`),
+  so programs using them previously failed to assemble.
+
 ## 0.6.0
 
 ### Added

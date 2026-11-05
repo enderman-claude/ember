@@ -218,7 +218,8 @@ def area(w: i64, h: i64) -> i64:
 ```
 
 Parameters are immutable. Functions can be called before they are defined, and they can
-recurse. Up to six parameters are supported. A function with a `->` clause must end in a
+recurse. Up to four parameters are supported (the Windows x64 convention passes four
+arguments in registers), for `extern def` as well. A function with a `->` clause must end in a
 `return`, or in an `if`/`elif`/`else` chain where every branch returns. The check is
 conservative: a `return` inside a loop doesn't count, even if the loop always runs.
 

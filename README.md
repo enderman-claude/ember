@@ -198,6 +198,36 @@ plain/scientific rules as Python's `repr`: `0.1`, `1e-05`, `1.2345678901234567e+
 `bigfloat` prints exactly when its decimal expansion ends, and otherwise with 40 digits and
 `...`: `100big / 3big` prints `33.3333333333333333333333333333333333333333...`.
 
+#### Math functions
+
+`sqrt`, `sin`, `cos`, `tan`, `atan`, `atan2`, `exp`, `ln`, `floor`, `ceil` and `abs` take
+`f64` (or `f32`) and return the same type; `atan2(y, x)` takes two of the same type. Angles
+are in radians. They do not take `i64` or `bigfloat` (convert with `f64(x)` first, as a
+bigfloat has no exact square root or sine), and because they are builtins you cannot define a
+function with one of these names (a variable can have it).
+
+```python
+def distance(x1: f64, y1: f64, x2: f64, y2: f64) -> f64:   # four parameters is the limit
+    dx = x2 - x1
+    dy = y2 - y1
+    return sqrt(dx * dx + dy * dy)
+```
+
+They are written in C with no libc or libm (`ember/runtime/ember_math.h`), so they work
+unchanged on every target, SHARD included, and a program prints the same digits everywhere.
+
+| Function | Accuracy versus a correctly rounded result |
+|---|---|
+| `sqrt`, `floor`, `ceil`, `abs` | exact (`sqrt` is correctly rounded) |
+| `sin`, `cos`, `atan`, `atan2`, `exp`, `ln` | within 2 ulp |
+| `tan` | within 4 ulp |
+
+An ulp is the gap between adjacent floats. So `exp(1.0)` prints `2.7182818284590455`, one ulp
+from `e`. `f32` versions compute in `f64` and round once. Special values follow IEEE 754:
+`sqrt` of a negative is NaN, `ln(0.0)` is `-inf`, `exp(1000.0)` is `inf`. `sin`, `cos` and
+`tan` are only accurate while the argument is below about 1.6 million in size; past that
+they return NaN instead of a wrong answer.
+
 ### Bindings and assignment
 
 ```python
@@ -292,6 +322,8 @@ it twice, is undefined behavior. A future version will add ownership rules that 
 | `read_int` | `() -> i64` | Reads the next integer from stdin. Returns 0 at end of input. |
 | `input_ended` | `() -> bool` | True if the last `read_int` hit end of input |
 | `put_byte` | `i64 -> unit` | Writes one raw byte (the low 8 bits) to stdout, for binary output |
+| `sqrt`, `sin`, `cos`, `tan`, `atan`, `exp`, `ln`, `floor`, `ceil`, `abs` | `f64 -> f64` or `f32 -> f32` | Math functions (see Math functions) |
+| `atan2` | `(f64, f64) -> f64` or `(f32, f32) -> f32` | Angle of the point (x, y), in radians |
 
 ## Examples
 

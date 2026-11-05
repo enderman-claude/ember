@@ -20,6 +20,9 @@ RUNTIME_SYMBOLS = [
     "ember_big_parse", "ember_big_neg", "ember_big_add", "ember_big_sub", "ember_big_mul",
     "ember_big_div", "ember_big_cmp", "ember_convert",
 ]
+# Math builtins (ember/runtime/ember_math.h): one f32 and one f64 entry point each.
+MATH_FUNCS = ["sqrt", "sin", "cos", "tan", "atan", "atan2", "exp", "ln", "floor", "ceil", "abs"]
+RUNTIME_SYMBOLS += [f"ember_{name}_{t}" for name in MATH_FUNCS for t in ("f32", "f64")]
 BIG_OPS = {"+": "ember_big_add", "-": "ember_big_sub", "*": "ember_big_mul", "/": "ember_big_div"}
 CONVERSION_CODES = {"i64": 0, "f32": 1, "f64": 2, "bigfloat": 3}   # ember_num.h EMBER_T_*
 WINDOW_SYMBOLS = ["ember_window_open", "ember_window_present", "ember_window_closed"]

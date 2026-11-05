@@ -49,7 +49,14 @@ PRINT_SYMBOLS = {
 }
 # Conversions f64(x), i64(x), ...: one runtime function that takes the source and target types.
 CONVERSION_SYMBOL = "ember_convert"
-RESERVED = set(BUILTINS) | {"print"} | set(NUMERIC)
+# Math builtins: name -> number of arguments. They take f32 or f64 (all arguments the same
+# type) and return that type; the runtime function is ember_<name>_f32 or ember_<name>_f64
+# (ember/runtime/ember_math.h). bigfloat is exact, so it has no sqrt or sin.
+MATH_BUILTINS = {
+    "sqrt": 1, "sin": 1, "cos": 1, "tan": 1, "atan": 1, "exp": 1, "ln": 1,
+    "floor": 1, "ceil": 1, "abs": 1, "atan2": 2,
+}
+RESERVED = set(BUILTINS) | {"print"} | set(NUMERIC) | set(MATH_BUILTINS)
 
 
 def check_entry_point(prog: n.Program):
@@ -227,6 +234,25 @@ class Checker:
         if got != want:
             raise CompileError(line, f"type mismatch in {what}: expected {want}, found {got}")
 
+    def math_call(self, e) -> str:
+        """sqrt(x), sin(x), atan2(y, x), ...: f32 or f64 in, the same type out."""
+        want = MATH_BUILTINS[e.name]
+        if len(e.args) != want:
+            raise CompileError(e.line, f"{e.name}() takes {want} argument(s), got {len(e.args)}")
+        types = [self.expr_type(a) for a in e.args]
+        t = types[0]
+        if t not in FLOAT_TYPES:
+            hint = " (convert it first, e.g. f64(x))" if t == "i64" else ""
+            if t == "bigfloat":
+                hint = " (bigfloat is exact, so it has no " + e.name + "; convert with f64(x))"
+            raise CompileError(e.line, f"{e.name}() takes f32 or f64, found {t}{hint}")
+        for other in types[1:]:
+            if other != t:
+                raise CompileError(
+                    e.line, f"{e.name}() needs both arguments the same type, found {t} and {other}")
+        e.symbol = f"ember_{e.name}_{t}"
+        return t
+
     def expr_type(self, e) -> str:
         """The type of e. Also records it on the node (e.ty) for the code generators."""
         t = self._expr_type(e)
@@ -311,6 +337,8 @@ class Checker:
                     raise CompileError(e.line, f"cannot convert {t} to {e.name}")
                 e.symbol = CONVERSION_SYMBOL
                 return e.name
+            if e.name in MATH_BUILTINS:
+                return self.math_call(e)
             sig = self.sigs.get(e.name)
             if sig is None:
                 raise CompileError(e.line, f"undefined function {e.name!r}")

@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "ember_num.h"
+#include "ember_math.h"
 
 extern void em_main(void);
 

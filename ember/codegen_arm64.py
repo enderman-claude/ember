@@ -270,23 +270,6 @@ class CodeGenArm64:
             self.gen_expr(s.expr)
 
     # -- expressions (result in x0) --------------------------------------------
-    def load_imm(self, reg, value):
-        """Loads any 64-bit constant with movz/movk (one instruction per non-zero 16-bit part).
-
-        GNU as cannot move every 64-bit immediate with a single `mov`, so this is explicit.
-        """
-        v = value & 0xFFFFFFFFFFFFFFFF
-        parts = [(shift, (v >> shift) & 0xFFFF) for shift in (0, 16, 32, 48)]
-        parts = [(sh, p) for sh, p in parts if p] or [(0, 0)]
-        first = True
-        for shift, part in parts:
-            suffix = f", lsl #{shift}" if shift else ""
-            if first:
-                self.emit(f"movz {reg}, #{part}{suffix}")
-                first = False
-            else:
-                self.emit(f"movk {reg}, #{part}{suffix}")
-
     def gen_expr(self, e):
         if isinstance(e, n.IntLit):
             self.load_imm("x0", e.value)

@@ -26,6 +26,9 @@ class Sig:
     platforms: tuple = None     # None means available on every target
 
 
+# Targets whose runtime has the window builtins (ember_rt.c, #ifdef _WIN32).
+WINDOWS_TARGETS = ("windows", "windows-arm64")
+
 # Builtins implemented by the C runtime (ember/runtime/ember_rt.c).
 BUILTINS = {
     "alloc": Sig(["i64"], ARRAY, "ember_alloc"),
@@ -35,9 +38,9 @@ BUILTINS = {
     "input_ended": Sig([], "bool", "ember_input_ended"),
     "put_byte": Sig(["i64"], "unit", "ember_put_byte"),
     # Windows-only window builtins (ember/runtime/ember_rt.c, #ifdef _WIN32).
-    "window_open": Sig(["i64", "i64"], "bool", "ember_window_open", ("windows",)),
-    "window_present": Sig([ARRAY], "unit", "ember_window_present", ("windows",)),
-    "window_closed": Sig([], "bool", "ember_window_closed", ("windows",)),
+    "window_open": Sig(["i64", "i64"], "bool", "ember_window_open", WINDOWS_TARGETS),
+    "window_present": Sig([ARRAY], "unit", "ember_window_present", WINDOWS_TARGETS),
+    "window_closed": Sig([], "bool", "ember_window_closed", WINDOWS_TARGETS),
 }
 # print() is overloaded on its argument type.
 PRINT_SYMBOLS = {
@@ -316,7 +319,8 @@ class Checker:
                     e.line, f"{e.name}() takes {len(sig.params)} argument(s), got {len(e.args)}")
             if sig.platforms and self.target not in sig.platforms:
                 raise CompileError(
-                    e.line, f"{e.name}() is only available when building for Windows (--target windows)")
+                    e.line, f"{e.name}() is only available when building for Windows "
+                                       "(--target windows or windows-arm64)")
             for arg, want in zip(e.args, sig.params):
                 self.require(self.expr_type(arg), want, e.line, f"argument to {e.name}()")
             e.symbol = sig.symbol

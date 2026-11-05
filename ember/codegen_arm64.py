@@ -27,7 +27,8 @@ def align16(x: int) -> int:
 
 
 class CodeGenArm64:
-    def __init__(self):
+    def __init__(self, target="linux-arm64"):
+        self.target = target                 # "linux-arm64" or "windows-arm64"
         self.lines = []
         self.label_count = 0
         self.scopes = []
@@ -46,6 +47,29 @@ class CodeGenArm64:
     def new_label(self, hint):
         self.label_count += 1
         return f".L{hint}{self.label_count}"
+
+    # -- constants ------------------------------------------------------------
+    def load_imm(self, reg, value):
+        """Loads a 64-bit constant into reg with movz/movk.
+
+        `mov reg, #imm` is not used because only some bit patterns are valid logical
+        immediates. GNU as expands other values itself, but clang's assembler (used for
+        Windows ARM64) rejects them. Explicit movz/movk is accepted by both.
+        """
+        v = value & 0xFFFFFFFFFFFFFFFF
+        if v == 0:
+            self.emit(f"movz {reg}, #0")
+            return
+        first = True
+        for shift in (0, 16, 32, 48):
+            chunk = (v >> shift) & 0xFFFF
+            if chunk == 0:
+                continue
+            if first:
+                self.emit(f"movz {reg}, #{chunk}, lsl #{shift}")
+                first = False
+            else:
+                self.emit(f"movk {reg}, #{chunk}, lsl #{shift}")
 
     # -- frame slots ----------------------------------------------------------
     # Slot k lives at [x29 - 8k]. Offsets beyond the unscaled range go through x16.
@@ -78,10 +102,16 @@ class CodeGenArm64:
             if f.body is not None:               # extern functions are resolved by the linker
                 self.gen_function(f)
         if self.strings:
-            self.lines.append(".section .rodata")
+            # Bigfloat literals. COFF (Windows) has no .rodata; its read-only section is .rdata.
+            if self.target == "linux-arm64":
+                self.lines.append(".section .rodata")
+            else:
+                self.lines.append('.section .rdata,"dr"')
             for label, text in self.strings:
                 self.lines.append(f'{label}: .asciz "{text}"')
-        self.lines.append('.section .note.GNU-stack,"",@progbits')
+        if self.target == "linux-arm64":
+            # ELF only: marks the stack as non-executable. COFF (Windows) has no such note.
+            self.lines.append('.section .note.GNU-stack,"",@progbits')
         return "\n".join(self.lines) + "\n"
 
     def gen_function(self, f: n.FuncDef):
@@ -313,7 +343,7 @@ class CodeGenArm64:
                 self.gen_expr(el)
                 self.emit("mov x2, x0")
                 self.load_slot("x0", handle)
-                self.emit(f"mov x1, #{i}")
+                self.load_imm("x1", i)
                 self.emit("bl ember_store")
             self.load_slot("x0", handle)
 
@@ -416,5 +446,5 @@ class CodeGenArm64:
             self.emit("mov x0, x2")
 
 
-def generate(prog: n.Program) -> str:
-    return CodeGenArm64().generate(prog)
+def generate(prog: n.Program, target: str = "linux-arm64") -> str:
+    return CodeGenArm64(target).generate(prog)

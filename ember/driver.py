@@ -14,7 +14,7 @@ from .errors import CompileError
 
 RUNTIME = Path(__file__).resolve().parent / "runtime" / "ember_rt.c"
 SHARD_RUNTIME = Path(__file__).resolve().parent / "runtime" / "ember_rt_shard.c"
-TARGETS = ("linux", "windows", "linux-arm64", "shard")
+TARGETS = ("linux", "windows", "linux-arm64", "windows-arm64", "shard")
 
 
 def compile_to_asm(src: str, target: str = "linux") -> str:
@@ -28,8 +28,8 @@ def compile_to_asm(src: str, target: str = "linux") -> str:
                 raise CompileError(f.line, f"extern def {f.name}() is not available for --target shard "
                                            "(SHARD images cannot call C code)")
     check(prog, target)
-    if target == "linux-arm64":
-        return generate_arm64(prog)
+    if target in ("linux-arm64", "windows-arm64"):
+        return generate_arm64(prog, target)
     return generate(prog, target)
 
 
@@ -52,6 +52,16 @@ def _find_elfpack():
         raise RuntimeError("elfpack not found: build it from https://github.com/enderman-claude/shard "
                            "(make build/elfpack) and put it on PATH or set EMBER_ELFPACK")
     return path
+
+
+def arm64_windows_compiler() -> str:
+    """Cross C compiler for Windows on ARM64 (aarch64-w64-mingw32-gcc, from llvm-mingw).
+
+    It assembles the generated AArch64 assembly (GNU syntax, COFF output) and links the
+    runtime, the same way the x86-64 Windows build uses x86_64-w64-mingw32-gcc.
+    EMBER_ARM64_WIN_CC names another compiler.
+    """
+    return os.environ.get("EMBER_ARM64_WIN_CC") or "aarch64-w64-mingw32-gcc"
 
 
 def arm64_compiler() -> str:
@@ -99,6 +109,17 @@ def build(src_path, out_path, target: str = "linux", link=()) -> Path:
             asm_file = Path(tmp) / "prog.s"
             asm_file.write_text(asm)
             _run([cc, "-O1", "-o", str(out), str(RUNTIME), str(asm_file), *sources, *flags, "-lm"])
+        return out
+
+    if target == "windows-arm64":
+        cc = arm64_windows_compiler()
+        _require(cc)
+        with tempfile.TemporaryDirectory() as tmp:
+            asm_file = Path(tmp) / "prog.s"
+            asm_file.write_text(asm)
+            # Same link as the x86-64 Windows build: GUI subsystem, static, system DLLs only.
+            _run([cc, "-O1", "-mwindows", "-static", "-o", str(out), str(RUNTIME), str(asm_file),
+                  *sources, *flags, "-luser32", "-lgdi32", "-lm"])
         return out
 
     if target == "windows":
